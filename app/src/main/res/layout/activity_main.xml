@@ -68,4 +68,14 @@
         android:text="Presa non ancora configurata"
         android:textSize="16sp" />
 
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="40dp" />
+
+    <Button
+        android:id="@+id/toggleButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Avvia monitoraggio" />
+
 </LinearLayout>
