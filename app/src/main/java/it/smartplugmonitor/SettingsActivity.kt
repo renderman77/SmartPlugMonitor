@@ -30,6 +30,9 @@ class SettingsActivity : AppCompatActivity() {
         val pollIntervalEditText =
             findViewById<EditText>(R.id.pollIntervalEditText)
 
+        val notificationStyleGroup =
+            findViewById<android.widget.RadioGroup>(R.id.notificationStyleGroup)
+
         val saveButton =
             findViewById<Button>(R.id.saveButton)
 
@@ -87,6 +90,17 @@ class SettingsActivity : AppCompatActivity() {
             )
         )
 
+        when (
+            preferences.getString(
+                "notification_style",
+                "allarme"
+            )
+        ) {
+            "normale" -> notificationStyleGroup.check(R.id.styleNormale)
+            "vibrazione" -> notificationStyleGroup.check(R.id.styleVibrazione)
+            else -> notificationStyleGroup.check(R.id.styleAllarme)
+        }
+
         saveButton.setOnClickListener {
 
             val threshold =
@@ -103,6 +117,13 @@ class SettingsActivity : AppCompatActivity() {
                 pollIntervalEditText.text
                     .toString()
                     .trim()
+
+            val notificationStyle =
+                when (notificationStyleGroup.checkedRadioButtonId) {
+                    R.id.styleNormale -> "normale"
+                    R.id.styleVibrazione -> "vibrazione"
+                    else -> "allarme"
+                }
 
             preferences.edit()
                 .putString(
@@ -134,6 +155,10 @@ class SettingsActivity : AppCompatActivity() {
                 .putString(
                     "poll_interval",
                     pollInterval
+                )
+                .putString(
+                    "notification_style",
+                    notificationStyle
                 )
                 .apply()
 
