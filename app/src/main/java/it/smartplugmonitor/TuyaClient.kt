@@ -25,12 +25,21 @@ class TuyaClient(
         private const val CMD_SESSION_FINISH = 0x05
         private const val CMD_DP_QUERY_NEW = 0x10
 
-    private val PREFIX =
-    byteArrayOf(0x00, 0x00, 0x66, 0x99.toByte())
+        private val PREFIX =
+            byteArrayOf(
+                0x00,
+                0x00,
+                0x66,
+                0x99.toByte()
+            )
 
-    private val SUFFIX =
-    byteArrayOf(0x00, 0x00, 0x99.toByte(), 0x66)
-
+        private val SUFFIX =
+            byteArrayOf(
+                0x00,
+                0x00,
+                0x99.toByte(),
+                0x66
+            )
     }
 
     private var socket: Socket? = null
@@ -39,10 +48,11 @@ class TuyaClient(
 
     private val random = SecureRandom()
 
-    private val key: ByteArray
+    private val realKey: ByteArray
         get() = localKey.toByteArray(Charsets.UTF_8)
 
     private var sessionKey: ByteArray? = null
+
     private var sequence = 1
 
     @Synchronized
@@ -50,29 +60,37 @@ class TuyaClient(
 
         ensureConnected()
 
-        val payload = JSONObject()
-            .put(
-                "data",
-                JSONObject().put(
-                    "dps",
-                    JSONObject()
+        val payload =
+            JSONObject()
+                .put(
+                    "data",
+                    JSONObject().put(
+                        "dps",
+                        JSONObject()
+                    )
                 )
-            )
-            .toString()
-            .toByteArray(Charsets.UTF_8)
+                .toString()
+                .toByteArray(Charsets.UTF_8)
 
         sendMessage(
             CMD_DP_QUERY_NEW,
             payload,
-            sessionKey ?: throw Exception("Sessione Tuya non disponibile")
+            sessionKey
+                ?: throw Exception(
+                    "Sessione Tuya non disponibile"
+                )
         )
 
         val frame = readMessage()
 
-        val plain = decryptFrame(
-            frame,
-            sessionKey ?: throw Exception("Sessione Tuya non disponibile")
-        )
+        val plain =
+            decryptFrame(
+                frame,
+                sessionKey
+                    ?: throw Exception(
+                        "Sessione Tuya non disponibile"
+                    )
+            )
 
         return extractPower(plain)
     }
@@ -80,14 +98,15 @@ class TuyaClient(
     private fun ensureConnected() {
 
         if (socket?.isConnected == true &&
-            socket?.isClosed == false
+            socket?.isClosed == false &&
+            sessionKey != null
         ) {
             return
         }
 
         close()
 
-        if (key.size != 16) {
+        if (realKey.size != 16) {
             throw Exception(
                 "La Local Key deve essere di 16 caratteri"
             )
@@ -96,62 +115,168 @@ class TuyaClient(
         socket = Socket()
 
         socket!!.connect(
-            InetSocketAddress(ipAddress, PORT),
+            InetSocketAddress(
+                ipAddress,
+                PORT
+            ),
             5000
         )
 
         socket!!.soTimeout = 5000
 
         input =
-            DataInputStream(socket!!.getInputStream())
+            DataInputStream(
+                socket!!.getInputStream()
+            )
 
         output =
-            DataOutputStream(socket!!.getOutputStream())
+            DataOutputStream(
+                socket!!.getOutputStream()
+            )
 
         negotiateSession()
     }
 
     private fun negotiateSession() {
 
-        // -------------------------------------------------
-        // 1. CLIENT -> DEVICE
-        //    START 0x03 + client nonce
-        // -------------------------------------------------
+        /*
+         * TUYA 3.5
+         *
+         * 1) START
+         *    client nonce = 16 byte
+         *
+         * 2) RESPONSE
+         *    device nonce = 16 byte
+         *    HMAC(client nonce) = 32 byte
+         *
+         * 3) FINISH
+         *    HMAC(device nonce) = 32 byte
+         *
+         * Session key:
+         * XOR(clientNonce, deviceNonce)
+         * AES-GCM con IV = clientNonce[0..11]
+         * sessionKey = risultato[12..27]
+         */
 
         val clientNonce = ByteArray(16)
         random.nextBytes(clientNonce)
 
+        // ------------------------------------------------
+        // STEP 1 - START
+        // ------------------------------------------------
+
         sendMessage(
             CMD_SESSION_START,
             clientNonce,
-            key
+            realKey
         )
 
-        // -------------------------------------------------
-        // 2. DEVICE -> CLIENT
-        //    RESPONSE 0x04
-        //    device nonce + HMAC(client nonce)
-        // -------------------------------------------------
+        // ------------------------------------------------
+        // STEP 2 - RESPONSE
+        // ------------------------------------------------
 
-        val response = readMessage()
+        val responseFrame =
+            readMessage()
 
         val responsePlain =
-            decryptFrame(response, key)
+            decryptFrame(
+                responseFrame,
+                realKey
+            )
 
-        if (responsePlain.size < 48) {
+        /*
+         * Alcune implementazioni/firmware possono
+         * includere il retcode nei primi 4 byte.
+         *
+         * Gestiamo entrambe le forme:
+         *
+         * 48 byte:
+         *   nonce 16 + HMAC 32
+         *
+         * 52 byte:
+         *   retcode 4 + nonce 16 + HMAC 32
+         */
+
+        val handshakePayload: ByteArray
+
+        when (responsePlain.size) {
+
+            48 -> {
+                handshakePayload = responsePlain
+            }
+
+            52 -> {
+
+                val retCode =
+                    readInt(
+                        responsePlain,
+                        0
+                    )
+
+                if (retCode != 0) {
+                    throw Exception(
+                        "Handshake rifiutato dalla presa: $retCode"
+                    )
+                }
+
+                handshakePayload =
+                    responsePlain.copyOfRange(
+                        4,
+                        responsePlain.size
+                    )
+            }
+
+            else -> {
+
+                /*
+                 * Gestione più permissiva:
+                 * se il payload è più lungo di 48 byte
+                 * e inizia con retcode 0, lo eliminiamo.
+                 */
+
+                if (responsePlain.size > 48 &&
+                    readInt(responsePlain, 0) == 0
+                ) {
+
+                    handshakePayload =
+                        responsePlain.copyOfRange(
+                            4,
+                            responsePlain.size
+                        )
+
+                } else {
+
+                    throw Exception(
+                        "Risposta handshake non valida: " +
+                            "${responsePlain.size} byte"
+                    )
+                }
+            }
+        }
+
+        if (handshakePayload.size < 48) {
             throw Exception(
-                "Risposta handshake non valida"
+                "Payload handshake troppo corto"
             )
         }
 
         val deviceNonce =
-            responsePlain.copyOfRange(0, 16)
+            handshakePayload.copyOfRange(
+                0,
+                16
+            )
 
         val receivedHmac =
-            responsePlain.copyOfRange(16, 48)
+            handshakePayload.copyOfRange(
+                16,
+                48
+            )
 
         val expectedHmac =
-            hmacSha256(key, clientNonce)
+            hmacSha256(
+                realKey,
+                clientNonce
+            )
 
         if (!receivedHmac.contentEquals(expectedHmac)) {
             throw Exception(
@@ -159,53 +284,85 @@ class TuyaClient(
             )
         }
 
-        // -------------------------------------------------
-        // 3. CLIENT -> DEVICE
-        //    FINISH 0x05 + HMAC(device nonce)
-        // -------------------------------------------------
+        // ------------------------------------------------
+        // STEP 3 - FINISH
+        // ------------------------------------------------
 
         val finishHmac =
-            hmacSha256(key, deviceNonce)
+            hmacSha256(
+                realKey,
+                deviceNonce
+            )
 
         sendMessage(
             CMD_SESSION_FINISH,
             finishHmac,
-            key
+            realKey
         )
 
-        // -------------------------------------------------
-        // SESSION KEY
-        //
-        // Tuya 3.5:
-        // XOR dei due nonce
-        // AES-GCM con IV = primi 12 byte del client nonce
-        // risultato [12:28]
-        // -------------------------------------------------
+        // ------------------------------------------------
+        // DERIVAZIONE SESSION KEY
+        // ------------------------------------------------
 
         val xorNonce = ByteArray(16)
 
         for (i in 0 until 16) {
+
             xorNonce[i] =
-                (deviceNonce[i].toInt()
-                    xor clientNonce[i].toInt()).toByte()
+                (
+                    clientNonce[i].toInt()
+                        xor deviceNonce[i].toInt()
+                    ).toByte()
         }
 
-        val derived =
+        val derivationIv =
+            clientNonce.copyOfRange(
+                0,
+                12
+            )
+
+        val encrypted =
             aesGcmEncrypt(
-                key = key,
-                iv = clientNonce.copyOfRange(0, 12),
+                key = realKey,
+                iv = derivationIv,
                 plaintext = xorNonce,
                 aad = null
             )
 
-        if (derived.size < 28) {
+        /*
+         * Java AES/GCM restituisce:
+         *
+         * ciphertext (16 byte)
+         * +
+         * authentication tag (16 byte)
+         *
+         * TinyTuya considera anche l'IV davanti:
+         *
+         * IV       12 byte
+         * DATA     16 byte
+         * TAG      16 byte
+         *
+         * Quindi:
+         *
+         * complete = IV + encrypted
+         *
+         * session key = complete[12..27]
+         */
+
+        val complete =
+            derivationIv + encrypted
+
+        if (complete.size < 28) {
             throw Exception(
-                "Impossibile generare session key"
+                "Derivazione session key non valida"
             )
         }
 
         sessionKey =
-            derived.copyOfRange(0, 16)
+            complete.copyOfRange(
+                12,
+                28
+            )
     }
 
     private fun sendMessage(
@@ -219,50 +376,84 @@ class TuyaClient(
         val iv = ByteArray(12)
         random.nextBytes(iv)
 
-        // IV + ciphertext + GCM tag
-        val length =
-            12 + plaintext.size + 16
-
-        // AAD = tutto l'header dopo il prefix.
-        val aad =
-            buildHeader(
-                seq,
-                command,
-                length
-            )
+        /*
+         * Per Tuya 3.5:
+         *
+         * header =
+         * reserved 2
+         * sequence 4
+         * command 4
+         * length 4
+         *
+         * length conta:
+         * IV + ciphertext + GCM tag
+         */
 
         val encrypted =
             aesGcmEncrypt(
                 key = encryptionKey,
                 iv = iv,
                 plaintext = plaintext,
-                aad = aad
+                aad = buildHeader(
+                    seq,
+                    command,
+                    12 + plaintext.size + 16
+                )
+            )
+
+        val length =
+            iv.size + encrypted.size
+
+        val header =
+            buildHeader(
+                seq,
+                command,
+                length
             )
 
         val frame =
             ByteArray(
                 PREFIX.size +
-                    aad.size +
+                    header.size +
                     iv.size +
                     encrypted.size +
                     SUFFIX.size
             )
 
-        var pos = 0
+        var position = 0
 
-        PREFIX.copyInto(frame, pos)
-        pos += PREFIX.size
+        PREFIX.copyInto(
+            frame,
+            position
+        )
 
-        aad.copyInto(frame, pos)
-        pos += aad.size
+        position += PREFIX.size
 
-        iv.copyInto(frame, pos)
-        pos += iv.size
+        header.copyInto(
+            frame,
+            position
+        )
 
-        encrypted.copyInto(frame, pos)
-        pos += encrypted.size
+        position += header.size
 
-        SUFFIX.copyInto(frame, pos)
+        iv.copyInto(
+            frame,
+            position
+        )
+
+        position += iv.size
+
+        encrypted.copyInto(
+            frame,
+            position
+        )
+
+        position += encrypted.size
+
+        SUFFIX.copyInto(
+            frame,
+            position
+        )
 
         output!!.write(frame)
         output!!.flush()
@@ -270,35 +461,60 @@ class TuyaClient(
 
     private fun readMessage(): ByteArray {
 
-        val inputStream =
-            input ?: throw Exception("Connessione assente")
+        val stream =
+            input
+                ?: throw Exception(
+                    "Connessione assente"
+                )
 
         val prefix = ByteArray(4)
-        inputStream.readFully(prefix)
+
+        stream.readFully(prefix)
 
         if (!prefix.contentEquals(PREFIX)) {
             throw Exception(
-                "La presa ha restituito un frame non valido"
+                "Frame Tuya non valido"
             )
         }
 
-        // reserved 2 + sequence 4 + command 4 + length 4
+        /*
+         * Header:
+         *
+         * reserved 2
+         * sequence 4
+         * command 4
+         * length 4
+         *
+         * = 14 byte
+         */
+
         val header = ByteArray(14)
-        inputStream.readFully(header)
 
-        val length = readInt(header, 10)
+        stream.readFully(header)
 
-        if (length < 28 || length > 1024 * 1024) {
+        val length =
+            readInt(
+                header,
+                10
+            )
+
+        if (length < 28 ||
+            length > 1024 * 1024
+        ) {
             throw Exception(
                 "Lunghezza frame non valida: $length"
             )
         }
 
-        val body = ByteArray(length)
-        inputStream.readFully(body)
+        val body =
+            ByteArray(length)
 
-        val suffix = ByteArray(4)
-        inputStream.readFully(suffix)
+        stream.readFully(body)
+
+        val suffix =
+            ByteArray(4)
+
+        stream.readFully(suffix)
 
         if (!suffix.contentEquals(SUFFIX)) {
             throw Exception(
@@ -320,23 +536,36 @@ class TuyaClient(
             )
         }
 
-        // Prefix = 4
-        // Header = 14
-        // IV = 12
+        /*
+         * 0..3   prefix
+         * 4..17  header
+         * 18..29 IV
+         * 30..   ciphertext + tag
+         */
+
         val header =
-            frame.copyOfRange(4, 18)
+            frame.copyOfRange(
+                4,
+                18
+            )
 
         val length =
-            readInt(header, 10)
+            readInt(
+                header,
+                10
+            )
 
         if (length < 28) {
             throw Exception(
-                "Lunghezza payload non valida"
+                "Payload Tuya non valido"
             )
         }
 
         val iv =
-            frame.copyOfRange(18, 30)
+            frame.copyOfRange(
+                18,
+                30
+            )
 
         val encrypted =
             frame.copyOfRange(
@@ -356,23 +585,27 @@ class TuyaClient(
         plain: ByteArray
     ): Double {
 
-        // 3.5 DP_QUERY_NEW:
-        //
-        // primi 4 byte = return code
-        // poi JSON
-        //
-        // Il protocollo documenta DP_QUERY_NEW
-        // tra i comandi che NON richiedono
-        // il version header 3.5.
-
-        if (plain.size <= 4) {
+        if (plain.size < 4) {
             throw Exception(
-                "Risposta DP vuota"
+                "Risposta DP troppo corta"
             )
         }
 
+        var position = 0
+
+        /*
+         * Tuya 3.5:
+         *
+         * retcode = primi 4 byte
+         */
+
         val retCode =
-            readInt(plain, 0)
+            readInt(
+                plain,
+                0
+            )
+
+        position += 4
 
         if (retCode != 0) {
             throw Exception(
@@ -380,9 +613,42 @@ class TuyaClient(
             )
         }
 
+        /*
+         * Dopo il retcode può esserci
+         * il blocco header da 15 byte.
+         *
+         * Lo riconosciamo dal prefisso "3.5".
+         */
+
+        if (plain.size >= position + 15) {
+
+            val versionBytes =
+                plain.copyOfRange(
+                    position,
+                    position + 3
+                )
+
+            if (versionBytes.contentEquals(
+                    byteArrayOf(
+                        0x33,
+                        0x2E,
+                        0x35
+                    )
+                )
+            ) {
+                position += 15
+            }
+        }
+
+        val jsonBytes =
+            plain.copyOfRange(
+                position,
+                plain.size
+            )
+
         val jsonText =
             String(
-                plain.copyOfRange(4, plain.size),
+                jsonBytes,
                 Charsets.UTF_8
             ).trim()
 
@@ -412,6 +678,7 @@ class TuyaClient(
 
         val value =
             when (raw) {
+
                 is Number ->
                     raw.toDouble()
 
@@ -423,6 +690,12 @@ class TuyaClient(
                         "Valore DP19 non numerico"
                     )
             }
+
+        /*
+         * Nel tuo modello:
+         *
+         * DP19 / 10 = Watt
+         */
 
         return value / 10.0
     }
@@ -474,15 +747,23 @@ class TuyaClient(
 
         cipher.init(
             Cipher.ENCRYPT_MODE,
-            SecretKeySpec(key, "AES"),
-            GCMParameterSpec(128, iv)
+            SecretKeySpec(
+                key,
+                "AES"
+            ),
+            GCMParameterSpec(
+                128,
+                iv
+            )
         )
 
         if (aad != null) {
             cipher.updateAAD(aad)
         }
 
-        return cipher.doFinal(plaintext)
+        return cipher.doFinal(
+            plaintext
+        )
     }
 
     private fun aesGcmDecrypt(
@@ -499,13 +780,21 @@ class TuyaClient(
 
         cipher.init(
             Cipher.DECRYPT_MODE,
-            SecretKeySpec(key, "AES"),
-            GCMParameterSpec(128, iv)
+            SecretKeySpec(
+                key,
+                "AES"
+            ),
+            GCMParameterSpec(
+                128,
+                iv
+            )
         )
 
         cipher.updateAAD(aad)
 
-        return cipher.doFinal(encrypted)
+        return cipher.doFinal(
+            encrypted
+        )
     }
 
     private fun hmacSha256(
@@ -514,7 +803,9 @@ class TuyaClient(
     ): ByteArray {
 
         val mac =
-            Mac.getInstance("HmacSHA256")
+            Mac.getInstance(
+                "HmacSHA256"
+            )
 
         mac.init(
             SecretKeySpec(
@@ -523,7 +814,9 @@ class TuyaClient(
             )
         )
 
-        return mac.doFinal(data)
+        return mac.doFinal(
+            data
+        )
     }
 
     private fun writeInt(
