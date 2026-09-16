@@ -105,6 +105,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshUiFromService() {
 
+        // Aggiornato anche qui (non solo al click e in onResume):
+        // avvio/arresto del servizio non sono istantanei, quindi il
+        // pulsante deve potersi "autocorreggere" da solo entro un
+        // secondo invece di restare bloccato sulla scritta sbagliata.
+        updateToggleButtonLabel()
+
         powerText.text = MonitorService.lastPowerText
         statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
         connectionText.text = MonitorService.lastConnectionText
