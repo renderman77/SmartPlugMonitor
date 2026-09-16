@@ -1,6 +1,7 @@
 package it.smartplugmonitor
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.view.Window
 import android.widget.Button
@@ -29,23 +30,22 @@ class FineCycleActivity : Activity() {
             R.id.okButton
         ).setOnClickListener {
 
-            sendBroadcast(
-                android.content.Intent(
-                    MonitorService.ACTION_UPDATE
+            val intent =
+                Intent(
+                    this,
+                    MonitorService::class.java
                 ).apply {
-                    setPackage(packageName)
-                    putExtra(
-                        "stop_alarm",
-                        true
-                    )
+                    action =
+                        MonitorService.ACTION_STOP_ALARM
                 }
-            )
+
+            startService(intent)
 
             finish()
         }
     }
 
     override fun onBackPressed() {
-        // Il tasto indietro non deve fermare l'avviso.
+        // Il tasto indietro non ferma l'avviso.
     }
 }
