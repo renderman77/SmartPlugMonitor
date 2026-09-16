@@ -18,6 +18,9 @@ class MonitorService : Service() {
         const val ACTION_UPDATE =
             "it.smartplugmonitor.MONITOR_UPDATE"
 
+        const val ACTION_STOP_ALARM =
+            "it.smartplugmonitor.STOP_ALARM"
+
         const val EXTRA_POWER = "power"
         const val EXTRA_STATE = "state"
         const val EXTRA_CONNECTION = "connection"
@@ -26,6 +29,7 @@ class MonitorService : Service() {
             "smartplug_monitor"
 
         private const val NOTIFICATION_ID = 1001
+        private const val FINISHED_NOTIFICATION_ID = 1002
 
         private const val DEFAULT_THRESHOLD = 10.0
         private const val DEFAULT_DEBOUNCE = 90L
@@ -57,8 +61,6 @@ class MonitorService : Service() {
                 }
 
                 readPower()
-
-                scheduleNextRead()
             }
         }
 
@@ -67,7 +69,7 @@ class MonitorService : Service() {
 
             override fun run() {
 
-                if (!cycleFinished || !running) {
+                if (!running || !cycleFinished) {
                     return
                 }
 
@@ -99,10 +101,40 @@ class MonitorService : Service() {
         startId: Int
     ): Int {
 
+        if (
+            intent?.action ==
+            ACTION_STOP_ALARM
+        ) {
+
+            stopAlarm()
+
+            cycleFinished = false
+
+            getSystemService(
+                NotificationManager::class.java
+            ).cancel(
+                FINISHED_NOTIFICATION_ID
+            )
+
+            sendUpdate(
+                0.0,
+                "MONITORAGGIO ATTIVO",
+                "Presa collegata"
+            )
+
+            return START_STICKY
+        }
+
         running = true
 
-        if (!handler.hasCallbacks(monitorRunnable)) {
-            readPower()
+        if (
+            !handler.hasCallbacks(
+                monitorRunnable
+            )
+        ) {
+            handler.post(
+                monitorRunnable
+            )
         }
 
         return START_STICKY
@@ -139,6 +171,7 @@ class MonitorService : Service() {
             deviceId.isEmpty() ||
             localKey.isEmpty()
         ) {
+
             sendUpdate(
                 0.0,
                 "NON CONFIGURATO",
@@ -146,10 +179,12 @@ class MonitorService : Service() {
             )
 
             scheduleNextRead()
+
             return
         }
 
         if (client == null) {
+
             client =
                 TuyaClient(
                     deviceId,
@@ -171,6 +206,8 @@ class MonitorService : Service() {
                         power,
                         preferences
                     )
+
+                    scheduleNextRead()
                 }
 
             } catch (e: Exception) {
@@ -186,6 +223,8 @@ class MonitorService : Service() {
                         e.message
                             ?: "Errore di connessione"
                     )
+
+                    scheduleNextRead()
                 }
             }
 
@@ -194,96 +233,107 @@ class MonitorService : Service() {
 
     private fun processPower(
         power: Double,
-        preferences: android.content.SharedPreferences
+        preferences:
+            android.content.SharedPreferences
     ) {
 
         val threshold =
             preferences.getString(
                 "off_threshold",
                 DEFAULT_THRESHOLD.toString()
-            )?.toDoubleOrNull()
+            )
+                ?.toDoubleOrNull()
                 ?: DEFAULT_THRESHOLD
 
         val debounce =
             preferences.getString(
                 "debounce_seconds",
                 DEFAULT_DEBOUNCE.toString()
-            )?.toLongOrNull()
+            )
+                ?.toLongOrNull()
                 ?.coerceAtLeast(1)
                 ?: DEFAULT_DEBOUNCE
 
-        when {
+        if (power >= threshold) {
 
-            power >= threshold -> {
+            cycleRunning = true
+            lowSince = 0L
 
-                /*
-                 * Nuovo avvio.
-                 *
-                 * Se era presente un avviso di fine ciclo,
-                 * il nuovo consumo lo annulla immediatamente.
-                 */
-                cycleRunning = true
+            if (cycleFinished) {
+
+                cycleFinished = false
+
+                stopAlarm()
+
+                getSystemService(
+                    NotificationManager::class.java
+                ).cancel(
+                    FINISHED_NOTIFICATION_ID
+                )
+            }
+
+            sendUpdate(
+                power,
+                "IN FUNZIONE",
+                "Presa collegata"
+            )
+
+            updateNotification(power)
+
+            return
+        }
+
+        if (cycleRunning) {
+
+            if (lowSince == 0L) {
+
+                lowSince =
+                    System.currentTimeMillis()
+            }
+
+            val elapsed =
+                (
+                    System.currentTimeMillis() -
+                        lowSince
+                ) / 1000L
+
+            if (elapsed >= debounce) {
+
+                cycleRunning = false
+                cycleFinished = true
                 lowSince = 0L
 
-                if (cycleFinished) {
-                    stopAlarm()
-                    cycleFinished = false
-                }
+                sendUpdate(
+                    power,
+                    "CICLO TERMINATO",
+                    "Presa collegata"
+                )
+
+                updateNotification(power)
+
+                startAlarm()
+
+                showFinishedNotification()
+
+            } else {
 
                 sendUpdate(
                     power,
                     "IN FUNZIONE",
                     "Presa collegata"
                 )
+
+                updateNotification(power)
             }
 
-            cycleRunning -> {
-
-                if (lowSince == 0L) {
-                    lowSince =
-                        System.currentTimeMillis()
-                }
-
-                val elapsed =
-                    (
-                        System.currentTimeMillis()
-                            - lowSince
-                    ) / 1000L
-
-                if (elapsed >= debounce) {
-
-                    cycleRunning = false
-                    cycleFinished = true
-                    lowSince = 0L
-
-                    sendUpdate(
-                        power,
-                        "CICLO TERMINATO",
-                        "Presa collegata"
-                    )
-
-                    startAlarm()
-
-                    showFinishedNotification()
-                } else {
-
-                    sendUpdate(
-                        power,
-                        "IN FUNZIONE",
-                        "Attesa conferma fine ciclo"
-                    )
-                }
-            }
-
-            else -> {
-
-                sendUpdate(
-                    power,
-                    "MONITORAGGIO ATTIVO",
-                    "Presa collegata"
-                )
-            }
+            return
         }
+
+        sendUpdate(
+            power,
+            "MONITORAGGIO ATTIVO",
+            "Presa collegata"
+        )
 
         updateNotification(power)
     }
@@ -300,7 +350,8 @@ class MonitorService : Service() {
             preferences.getString(
                 "poll_interval",
                 DEFAULT_POLL.toString()
-            )?.toLongOrNull()
+            )
+                ?.toLongOrNull()
                 ?.coerceAtLeast(1)
                 ?: DEFAULT_POLL
 
@@ -408,8 +459,11 @@ class MonitorService : Service() {
             NotificationChannel(
                 CHANNEL_ID,
                 "Smart Plug Monitor",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             )
+
+        channel.description =
+            "Avvisi del monitoraggio della presa"
 
         manager.createNotificationChannel(
             channel
@@ -432,7 +486,7 @@ class MonitorService : Service() {
                 0,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or
-                        PendingIntent.FLAG_IMMUTABLE
+                    PendingIntent.FLAG_IMMUTABLE
             )
 
         return NotificationCompat.Builder(
@@ -451,16 +505,65 @@ class MonitorService : Service() {
             .build()
     }
 
+    private fun showFinishedNotification() {
+
+        val intent =
+            Intent(
+                this,
+                FineCycleActivity::class.java
+            )
+
+        val pendingIntent =
+            PendingIntent.getActivity(
+                this,
+                1,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or
+                    PendingIntent.FLAG_IMMUTABLE
+            )
+
+        val notification =
+            NotificationCompat.Builder(
+                this,
+                CHANNEL_ID
+            )
+                .setSmallIcon(
+                    android.R.drawable.ic_dialog_alert
+                )
+                .setContentTitle(
+                    "CICLO TERMINATO"
+                )
+                .setContentText(
+                    "Premi per aprire l'avviso"
+                )
+                .setPriority(
+                    NotificationCompat.PRIORITY_MAX
+                )
+                .setCategory(
+                    NotificationCompat.CATEGORY_ALARM
+                )
+                .setAutoCancel(false)
+                .setOngoing(true)
+                .setContentIntent(
+                    pendingIntent
+                )
+                .build()
+
+        getSystemService(
+            NotificationManager::class.java
+        ).notify(
+            FINISHED_NOTIFICATION_ID,
+            notification
+        )
+    }
+
     private fun updateNotification(
         power: Double
     ) {
 
-        val manager =
-            getSystemService(
-                NotificationManager::class.java
-            )
-
-        manager.notify(
+        getSystemService(
+            NotificationManager::class.java
+        ).notify(
             NOTIFICATION_ID,
             buildNotification(
                 String.format(
@@ -468,21 +571,6 @@ class MonitorService : Service() {
                     "Monitoraggio: %.1f W",
                     power
                 )
-            )
-        )
-    }
-
-    private fun showFinishedNotification() {
-
-        val manager =
-            getSystemService(
-                NotificationManager::class.java
-            )
-
-        manager.notify(
-            1002,
-            buildNotification(
-                "CICLO TERMINATO"
             )
         )
     }
