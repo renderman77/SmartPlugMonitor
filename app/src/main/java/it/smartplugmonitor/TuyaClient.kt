@@ -25,11 +25,12 @@ class TuyaClient(
         private const val CMD_SESSION_FINISH = 0x05
         private const val CMD_DP_QUERY_NEW = 0x10
 
-        private val PREFIX =
-            byteArrayOf(0x00, 0x00, 0x66, 0x99)
+    private val PREFIX =
+    byteArrayOf(0x00, 0x00, 0x66, 0x99.toByte())
 
-        private val SUFFIX =
-            byteArrayOf(0x00, 0x00, 0x99, 0x66)
+    private val SUFFIX =
+    byteArrayOf(0x00, 0x00, 0x99.toByte(), 0x66)
+
     }
 
     private var socket: Socket? = null
