@@ -48,7 +48,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Local Key"
-            android:inputType="textPassword"
+            android:inputType="text"
             android:singleLine="true" />
 
         <TextView
@@ -63,29 +63,14 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Soglia Power Max"
-            android:textSize="16sp" />
-
-        <EditText
-            android:id="@+id/onThresholdEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="50"
-            android:inputType="numberDecimal"
-            android:singleLine="true"
-            android:layout_marginBottom="16dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Soglia Power Min"
+            android:text="Soglia fine ciclo (W)"
             android:textSize="16sp" />
 
         <EditText
             android:id="@+id/offThresholdEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="8"
+            android:hint="10"
             android:inputType="numberDecimal"
             android:singleLine="true"
             android:layout_marginBottom="16dp" />
@@ -93,7 +78,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Conferma fine ciclo"
+            android:text="Conferma fine ciclo (s)"
             android:textSize="16sp" />
 
         <EditText
@@ -108,7 +93,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Intervallo lettura"
+            android:text="Intervallo lettura (s)"
             android:textSize="16sp" />
 
         <EditText
