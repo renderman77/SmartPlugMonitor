@@ -74,92 +74,112 @@ class MainActivity : AppCompatActivity() {
         val localKey =
             preferences.getString("local_key", "") ?: ""
 
-        if (ip.isEmpty() ||
+        if (
+            ip.isEmpty() ||
             deviceId.isEmpty() ||
             localKey.isEmpty()
         ) {
             statusText.text = "●  NON CONFIGURATO"
+
             statusText.setTextColor(
-                getColor(android.R.color.darker_gray)
+                getColor(
+                    android.R.color.darker_gray
+                )
             )
+
             connectionText.text =
                 "Configura la presa nelle impostazioni"
+
             return
         }
 
         val pollInterval =
-            (preferences.getString(
-                "poll_interval",
-                "5"
-            ) ?: "5").toLongOrNull()?.coerceAtLeast(1)
+            (
+                preferences.getString(
+                    "poll_interval",
+                    "5"
+                ) ?: "5"
+            )
+                .toLongOrNull()
+                ?.coerceAtLeast(1)
                 ?: 5
 
-        client = TuyaClient(
-            deviceId,
-            ip,
-            localKey
-        )
+        client =
+            TuyaClient(
+                deviceId,
+                ip,
+                localKey
+            )
 
-        monitorThread = Thread {
+        monitorThread =
+            Thread {
 
-            while (running) {
+                while (running) {
 
-                try {
+                    try {
 
-                    val power =
-                        client!!.getPower()
+                        val power =
+                            client!!.getPower()
 
-                    runOnUiThread {
+                        runOnUiThread {
 
-                        powerText.text =
-                            String.format(
-                                java.util.Locale.US,
-                                "%.1f W",
-                                power
+                            powerText.text =
+                                String.format(
+                                    java.util.Locale.US,
+                                    "%.1f W",
+                                    power
+                                )
+
+                            statusText.text =
+                                "●  MONITORAGGIO ATTIVO"
+
+                            statusText.setTextColor(
+                                getColor(
+                                    android.R.color.holo_green_dark
+                                )
                             )
 
-                        statusText.text =
-                            "●  MONITORAGGIO ATTIVO"
+                            connectionText.text =
+                                "Presa collegata"
+                        }
 
-                        statusText.setTextColor(
-                            getColor(
-                                android.R.color.holo_green_dark
+                    } catch (e: Exception) {
+
+                        client?.close()
+
+                        runOnUiThread {
+
+                            statusText.text =
+                                "●  PRESA NON RAGGIUNGIBILE"
+
+                            statusText.setTextColor(
+                                getColor(
+                                    android.R.color.holo_red_dark
+                                )
                             )
-                        )
 
-                        connectionText.text =
-                            "Presa collegata"
+                            connectionText.text =
+                                e.message
+                                    ?: "Errore di connessione"
+                        }
                     }
 
-                } catch (e: Exception) {
+                    try {
 
-                    client?.close()
-
-                    runOnUiThread {
-
-                        statusText.text =
-                            "●  PRESA NON RAGGIUNGIBILE"
-
-                        statusText.setTextColor(
-                            getColor(
-                                android.R.color.holo_red_dark
-                            )
+                        Thread.sleep(
+                            pollInterval * 1000L
                         )
 
-                        connectionText.text =
-                            e.message ?: "Errore di connessione"
+                    } catch (
+                        _: InterruptedException
+                    ) {
+
+                        break
                     }
                 }
 
-                try {
-                    Thread.sleep(pollInterval * 1000L)
-                } catch (_: InterruptedException) {
-                    break
-                }
+            }.also {
+                it.start()
             }
-
-        }.also {
-            it.start()
-        }
     }
 }
