@@ -17,7 +17,7 @@
             android:text="Impostazioni"
             android:textSize="26sp"
             android:textStyle="bold"
-            android:layout_marginBottom="24dp" />
+            android:layout_marginBottom="28dp" />
 
         <TextView
             android:layout_width="match_parent"
@@ -31,7 +31,7 @@
             android:id="@+id/ipEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="IP locale"
+            android:hint="Indirizzo IP locale"
             android:inputType="text"
             android:singleLine="true" />
 
@@ -57,47 +57,74 @@
             android:text="Rilevamento"
             android:textSize="18sp"
             android:textStyle="bold"
-            android:layout_marginTop="28dp"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginTop="32dp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Soglia Power Max"
+            android:textSize="16sp" />
 
         <EditText
             android:id="@+id/onThresholdEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Avvio sopra (W)"
+            android:hint="50"
             android:inputType="numberDecimal"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Soglia Power Min"
+            android:textSize="16sp" />
 
         <EditText
             android:id="@+id/offThresholdEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Fine sotto (W)"
+            android:hint="8"
             android:inputType="numberDecimal"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Conferma fine ciclo"
+            android:textSize="16sp" />
 
         <EditText
             android:id="@+id/debounceEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Conferma fine (secondi)"
+            android:hint="90"
             android:inputType="number"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Intervallo lettura"
+            android:textSize="16sp" />
 
         <EditText
             android:id="@+id/pollIntervalEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Intervallo lettura (secondi)"
+            android:hint="5"
             android:inputType="number"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:layout_marginBottom="28dp" />
 
         <Button
             android:id="@+id/saveButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SALVA"
-            android:layout_marginTop="32dp" />
+            android:text="SALVA" />
 
     </LinearLayout>
 
