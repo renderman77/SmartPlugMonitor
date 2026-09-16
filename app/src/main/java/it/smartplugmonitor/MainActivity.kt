@@ -1,21 +1,46 @@
 package it.smartplugmonitor
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
+import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
-
-    private var client: TuyaClient? = null
-    private var monitorThread: Thread? = null
 
     private lateinit var statusText: TextView
     private lateinit var powerText: TextView
     private lateinit var connectionText: TextView
+    private lateinit var toggleButton: Button
 
-    @Volatile
-    private var running = true
+    private val uiHandler = Handler(Looper.getMainLooper())
+
+    private val uiRefreshRunnable =
+        object : Runnable {
+            override fun run() {
+                refreshUiFromService()
+                uiHandler.postDelayed(this, 1000L)
+            }
+        }
+
+    // Deve essere registrato come proprietà della classe (non dentro
+    // onCreate), è un requisito di Android per questo tipo di richiesta.
+    private val notificationPermissionLauncher =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { /* se l'utente nega, semplicemente non arriveranno notifiche */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,161 +50,126 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         powerText = findViewById(R.id.powerText)
         connectionText = findViewById(R.id.connectionText)
+        toggleButton = findViewById(R.id.toggleButton)
 
         findViewById<ImageButton>(R.id.settingsButton)
             .setOnClickListener {
-                startActivity(
-                    android.content.Intent(
-                        this,
-                        SettingsActivity::class.java
-                    )
-                )
+                startActivity(Intent(this, SettingsActivity::class.java))
             }
+
+        toggleButton.setOnClickListener {
+
+            if (MonitorService.isServiceRunning) {
+                stopMonitorService()
+            } else {
+                requestNotificationPermissionIfNeeded()
+                startMonitorService()
+            }
+
+            updateToggleButtonLabel()
+        }
+
+        requestNotificationPermissionIfNeeded()
+        maybeAskIgnoreBatteryOptimizations()
     }
 
     override fun onResume() {
         super.onResume()
-
-        running = true
-        startMonitoring()
+        updateToggleButtonLabel()
+        uiHandler.post(uiRefreshRunnable)
     }
 
     override fun onPause() {
         super.onPause()
-
-        running = false
-
-        monitorThread?.interrupt()
-        monitorThread = null
-
-        client?.close()
-        client = null
+        uiHandler.removeCallbacks(uiRefreshRunnable)
     }
 
-    private fun startMonitoring() {
+    private fun startMonitorService() {
+        val intent = Intent(this, MonitorService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+    }
 
-        if (monitorThread?.isAlive == true) {
-            return
-        }
+    private fun stopMonitorService() {
+        stopService(Intent(this, MonitorService::class.java))
+    }
 
-        val preferences =
-            getSharedPreferences("settings", MODE_PRIVATE)
+    private fun updateToggleButtonLabel() {
 
-        val ip =
-            preferences.getString("ip_address", "") ?: ""
-
-        val deviceId =
-            preferences.getString("device_id", "") ?: ""
-
-        val localKey =
-            preferences.getString("local_key", "") ?: ""
-
-        if (
-            ip.isEmpty() ||
-            deviceId.isEmpty() ||
-            localKey.isEmpty()
-        ) {
-            statusText.text = "●  NON CONFIGURATO"
-
-            statusText.setTextColor(
-                getColor(
-                    android.R.color.darker_gray
-                )
-            )
-
-            connectionText.text =
-                "Configura la presa nelle impostazioni"
-
-            return
-        }
-
-        val pollInterval =
-            (
-                preferences.getString(
-                    "poll_interval",
-                    "5"
-                ) ?: "5"
-            )
-                .toLongOrNull()
-                ?.coerceAtLeast(1)
-                ?: 5
-
-        client =
-            TuyaClient(
-                deviceId,
-                ip,
-                localKey
-            )
-
-        monitorThread =
-            Thread {
-
-                while (running) {
-
-                    try {
-
-                        val power =
-                            client!!.getPower()
-
-                        runOnUiThread {
-
-                            powerText.text =
-                                String.format(
-                                    java.util.Locale.US,
-                                    "%.1f W",
-                                    power
-                                )
-
-                            statusText.text =
-                                "●  MONITORAGGIO ATTIVO"
-
-                            statusText.setTextColor(
-                                getColor(
-                                    android.R.color.holo_green_dark
-                                )
-                            )
-
-                            connectionText.text =
-                                "Presa collegata"
-                        }
-
-                    } catch (e: Exception) {
-
-                        client?.close()
-
-                        runOnUiThread {
-
-                            statusText.text =
-                                "●  PRESA NON RAGGIUNGIBILE"
-
-                            statusText.setTextColor(
-                                getColor(
-                                    android.R.color.holo_red_dark
-                                )
-                            )
-
-                            connectionText.text =
-                                e.message
-                                    ?: "Errore di connessione"
-                        }
-                    }
-
-                    try {
-
-                        Thread.sleep(
-                            pollInterval * 1000L
-                        )
-
-                    } catch (
-                        _: InterruptedException
-                    ) {
-
-                        break
-                    }
-                }
-
-            }.also {
-                it.start()
+        toggleButton.text =
+            if (MonitorService.isServiceRunning) {
+                "Ferma monitoraggio"
+            } else {
+                "Avvia monitoraggio"
             }
+    }
+
+    private fun refreshUiFromService() {
+
+        powerText.text = MonitorService.lastPowerText
+        statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
+        connectionText.text = MonitorService.lastConnectionText
+
+        val color =
+            when {
+                !MonitorService.isServiceRunning ->
+                    android.R.color.darker_gray
+
+                MonitorService.lastStatusText == "In funzione" ->
+                    android.R.color.holo_green_dark
+
+                MonitorService.lastConnectionText.contains(
+                    "non raggiungibile",
+                    ignoreCase = true
+                ) -> android.R.color.holo_red_dark
+
+                else -> android.R.color.holo_blue_dark
+            }
+
+        statusText.setTextColor(getColor(color))
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            val granted =
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+
+            if (!granted) {
+                notificationPermissionLauncher.launch(
+                    Manifest.permission.POST_NOTIFICATIONS
+                )
+            }
+        }
+    }
+
+    private fun maybeAskIgnoreBatteryOptimizations() {
+
+        val powerManager =
+            getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+
+            try {
+
+                val intent =
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    ).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+
+                startActivity(intent)
+
+            } catch (_: Exception) {
+                // Alcuni produttori (es. certi Samsung/Xiaomi) bloccano
+                // questo intent di sistema: in quel caso va disattivato
+                // manualmente il risparmio energetico per l'app dalle
+                // impostazioni del telefono.
+            }
+        }
     }
 }
