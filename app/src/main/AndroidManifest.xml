@@ -9,24 +9,11 @@
     <uses-permission
         android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <uses-permission
-        android:name="android.permission.FOREGROUND_SERVICE" />
-
-    <uses-permission
-        android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-
-    <uses-permission
-        android:name="android.permission.POST_NOTIFICATIONS" />
-
     <application
         android:allowBackup="true"
         android:label="Smart Plug Monitor"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
-        <activity
-            android:name=".FineCycleActivity"
-            android:exported="false" />
 
         <activity
             android:name=".SettingsActivity"
@@ -45,11 +32,6 @@
             </intent-filter>
 
         </activity>
-
-        <service
-            android:name=".MonitorService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
 
     </application>
 
