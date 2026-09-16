@@ -105,6 +105,42 @@
             android:singleLine="true"
             android:layout_marginBottom="28dp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Notifica di fine ciclo"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="32dp"
+            android:layout_marginBottom="12dp" />
+
+        <RadioGroup
+            android:id="@+id/notificationStyleGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="28dp">
+
+            <RadioButton
+                android:id="@+id/styleAllarme"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Allarme (suono ripetuto + vibrazione + LED)" />
+
+            <RadioButton
+                android:id="@+id/styleNormale"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Normale (suono di notifica standard)" />
+
+            <RadioButton
+                android:id="@+id/styleVibrazione"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Solo vibrazione (senza suono)" />
+
+        </RadioGroup>
+
         <Button
             android:id="@+id/saveButton"
             android:layout_width="match_parent"
