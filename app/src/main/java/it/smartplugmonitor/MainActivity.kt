@@ -5,6 +5,9 @@ import android.os.Bundle
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -22,17 +25,35 @@ class MainActivity : AppCompatActivity() {
     private enum class State {
         ATTESA,
         IN_FUNZIONE,
-        CONTEGGIO_FINE
+        CONTEGGIO_FINE,
+        CICLO_TERMINATO
     }
+
+    private var state = State.ATTESA
+
+    private val logFile: File by lazy {
+        File(filesDir, "monitor_log.txt")
+    }
+
+    private val logFormat =
+        SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            Locale.US
+        )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText)
-        powerText = findViewById(R.id.powerText)
-        connectionText = findViewById(R.id.connectionText)
+        statusText =
+            findViewById(R.id.statusText)
+
+        powerText =
+            findViewById(R.id.powerText)
+
+        connectionText =
+            findViewById(R.id.connectionText)
 
         findViewById<ImageButton>(R.id.settingsButton)
             .setOnClickListener {
@@ -44,12 +65,17 @@ class MainActivity : AppCompatActivity() {
                     )
                 )
             }
+
+        writeLog("APP | avviata")
     }
 
     override fun onResume() {
         super.onResume()
 
         running = true
+
+        writeLog("MONITOR | avvio monitoraggio")
+
         startMonitoring()
     }
 
@@ -57,6 +83,8 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
 
         running = false
+
+        writeLog("MONITOR | pausa monitoraggio")
 
         monitorThread?.interrupt()
         monitorThread = null
@@ -95,12 +123,18 @@ class MainActivity : AppCompatActivity() {
                 ""
             ) ?: ""
 
-        if (ip.isEmpty() ||
+        if (
+            ip.isEmpty() ||
             deviceId.isEmpty() ||
             localKey.isEmpty()
         ) {
 
+            writeLog(
+                "CONFIG | presa non configurata"
+            )
+
             showNotConfigured()
+
             return
         }
 
@@ -131,6 +165,14 @@ class MainActivity : AppCompatActivity() {
                 ?.coerceAtLeast(1L)
                 ?: 5L
 
+        writeLog(
+            "CONFIG | soglia=${threshold}W | " +
+                    "conferma=${debounceSeconds}s | " +
+                    "intervallo=${pollInterval}s"
+        )
+
+        state = State.ATTESA
+
         client =
             TuyaClient(
                 deviceId,
@@ -140,11 +182,16 @@ class MainActivity : AppCompatActivity() {
 
         monitorThread = Thread {
 
-            var state = State.ATTESA
-
             var lowPowerStart: Long? = null
 
             while (running) {
+
+                val requestTime =
+                    System.currentTimeMillis()
+
+                writeLog(
+                    "REQUEST | richiesta potenza"
+                )
 
                 try {
 
@@ -154,8 +201,20 @@ class MainActivity : AppCompatActivity() {
                                 "Connessione assente"
                             )
 
-                    val now =
+                    val responseTime =
                         System.currentTimeMillis()
+
+                    val responseMs =
+                        responseTime - requestTime
+
+                    writeLog(
+                        String.format(
+                            Locale.US,
+                            "POWER | %.1f W | risposta=%d ms",
+                            power,
+                            responseMs
+                        )
+                    )
 
                     runOnUiThread {
 
@@ -170,16 +229,23 @@ class MainActivity : AppCompatActivity() {
                             "Presa collegata"
                     }
 
+                    val now =
+                        System.currentTimeMillis()
+
                     when (state) {
 
                         State.ATTESA -> {
-
-                            lowPowerStart = null
 
                             if (power >= threshold) {
 
                                 state =
                                     State.IN_FUNZIONE
+
+                                lowPowerStart = null
+
+                                writeLog(
+                                    "STATE | ATTESA -> IN_FUNZIONE"
+                                )
 
                                 updateStatus(
                                     "●  IN FUNZIONE",
@@ -199,32 +265,32 @@ class MainActivity : AppCompatActivity() {
 
                             if (power >= threshold) {
 
-                                /*
-                                 * Il ciclo è ancora attivo.
-                                 * Qualsiasi vecchio conteggio
-                                 * viene cancellato.
-                                 */
                                 lowPowerStart = null
 
                                 updateStatus(
-                                    "●  IN FUNZIONE",
+                                    "●  MONITORAGGIO ATTIVO",
                                     android.R.color.holo_green_dark
                                 )
 
                             } else {
 
-                                /*
-                                 * Sotto soglia:
-                                 * parte un NUOVO conteggio.
-                                 */
                                 lowPowerStart = now
 
                                 state =
                                     State.CONTEGGIO_FINE
 
+                                writeLog(
+                                    "STATE | IN_FUNZIONE -> " +
+                                            "CONTEGGIO_FINE"
+                                )
+
+                                /*
+                                 * Non mostriamo un alert
+                                 * all'utente.
+                                 */
                                 updateStatus(
-                                    "●  POSSIBILE FINE CICLO",
-                                    android.R.color.holo_orange_dark
+                                    "●  MONITORAGGIO ATTIVO",
+                                    android.R.color.holo_green_dark
                                 )
                             }
                         }
@@ -234,18 +300,20 @@ class MainActivity : AppCompatActivity() {
                             if (power >= threshold) {
 
                                 /*
-                                 * È tornata sopra soglia.
-                                 *
-                                 * Quindi era una pausa o comunque
-                                 * il ciclo non era terminato.
-                                 *
-                                 * CANCELLIAMO COMPLETAMENTE
-                                 * il conteggio.
+                                 * La potenza è risalita:
+                                 * il conteggio viene completamente
+                                 * cancellato.
                                  */
                                 lowPowerStart = null
 
                                 state =
                                     State.IN_FUNZIONE
+
+                                writeLog(
+                                    "STATE | CONTEGGIO_FINE -> " +
+                                            "IN_FUNZIONE | " +
+                                            "conteggio azzerato"
+                                )
 
                                 updateStatus(
                                     "●  IN FUNZIONE",
@@ -254,49 +322,107 @@ class MainActivity : AppCompatActivity() {
 
                             } else {
 
-                                /*
-                                 * È ancora sotto soglia.
-                                 * Il conteggio continua.
-                                 */
                                 val start =
                                     lowPowerStart ?: now
 
                                 val elapsed =
                                     (now - start) / 1000L
 
-                                if (elapsed >= debounceSeconds) {
+                                writeLog(
+                                    "LOW | sotto soglia da " +
+                                            "${elapsed}s"
+                                )
 
-                                    /*
-                                     * FINE CICLO.
-                                     *
-                                     * La notifica verrà inserita
-                                     * qui nel prossimo passaggio.
-                                     */
+                                if (
+                                    elapsed >=
+                                    debounceSeconds
+                                ) {
+
+                                    state =
+                                        State.CICLO_TERMINATO
+
+                                    lowPowerStart =
+                                        null
+
+                                    writeLog(
+                                        "STATE | CONTEGGIO_FINE -> " +
+                                                "CICLO_TERMINATO"
+                                    )
+
                                     updateStatus(
                                         "●  CICLO TERMINATO",
                                         android.R.color.holo_blue_dark
                                     )
 
-                                    state =
-                                        State.ATTESA
-
-                                    lowPowerStart =
-                                        null
-
                                 } else {
 
+                                    /*
+                                     * Rimane semplicemente
+                                     * in monitoraggio.
+                                     */
                                     updateStatus(
-                                        "●  POSSIBILE FINE CICLO",
-                                        android.R.color.holo_orange_dark
+                                        "●  MONITORAGGIO ATTIVO",
+                                        android.R.color.holo_green_dark
                                     )
                                 }
+                            }
+                        }
+
+                        State.CICLO_TERMINATO -> {
+
+                            /*
+                             * Dopo la fine ciclo continuiamo
+                             * a interrogare la presa normalmente.
+                             *
+                             * Se supera la soglia, è iniziato
+                             * un nuovo ciclo.
+                             */
+                            if (power >= threshold) {
+
+                                state =
+                                    State.IN_FUNZIONE
+
+                                lowPowerStart = null
+
+                                writeLog(
+                                    "STATE | CICLO_TERMINATO -> " +
+                                            "IN_FUNZIONE | nuovo ciclo"
+                                )
+
+                                updateStatus(
+                                    "●  IN FUNZIONE",
+                                    android.R.color.holo_green_dark
+                                )
+
+                            } else {
+
+                                updateStatus(
+                                    "●  CICLO TERMINATO",
+                                    android.R.color.holo_blue_dark
+                                )
                             }
                         }
                     }
 
                 } catch (e: Exception) {
 
+                    val errorTime =
+                        System.currentTimeMillis()
+
+                    val errorMs =
+                        errorTime - requestTime
+
+                    writeLog(
+                        "ERROR | dopo ${errorMs}ms | " +
+                                "${e.javaClass.simpleName} | " +
+                                "${e.message ?: "errore sconosciuto"}"
+                    )
+
                     client?.close()
+
+                    writeLog(
+                        "CONNECTION | client chiuso dopo errore"
+                    )
 
                     runOnUiThread {
 
@@ -317,15 +443,27 @@ class MainActivity : AppCompatActivity() {
 
                 try {
 
+                    writeLog(
+                        "WAIT | attesa ${pollInterval}s"
+                    )
+
                     Thread.sleep(
                         pollInterval * 1000L
                     )
 
                 } catch (_: InterruptedException) {
 
+                    writeLog(
+                        "MONITOR | thread interrotto"
+                    )
+
                     break
                 }
             }
+
+            writeLog(
+                "MONITOR | thread terminato"
+            )
 
         }.also {
             it.start()
@@ -357,11 +495,40 @@ class MainActivity : AppCompatActivity() {
 
         runOnUiThread {
 
-            statusText.text = text
+            statusText.text =
+                text
 
             statusText.setTextColor(
                 getColor(color)
             )
+        }
+    }
+
+    private fun writeLog(message: String) {
+
+        try {
+
+            val line =
+                "${logFormat.format(Date())} | $message\n"
+
+            synchronized(logFile) {
+
+                /*
+                 * Manteniamo il file piccolo.
+                 * Se supera 500 KB lo ricominciamo.
+                 */
+                if (
+                    logFile.exists() &&
+                    logFile.length() > 500_000
+                ) {
+                    logFile.writeText("")
+                }
+
+                logFile.appendText(line)
+            }
+
+        } catch (_: Exception) {
+            // Il logging non deve mai bloccare il monitoraggio.
         }
     }
 }
