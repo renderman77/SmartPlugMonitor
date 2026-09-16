@@ -205,7 +205,7 @@ class TuyaClient(
         }
 
         sessionKey =
-            derived.copyOfRange(12, 28)
+            derived.copyOfRange(0, 16)
     }
 
     private fun sendMessage(
