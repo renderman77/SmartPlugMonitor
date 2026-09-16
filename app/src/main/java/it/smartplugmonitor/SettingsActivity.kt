@@ -12,14 +12,16 @@ class SettingsActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_settings)
 
-        val ipEditText = findViewById<EditText>(R.id.ipEditText)
-        val deviceIdEditText = findViewById<EditText>(R.id.deviceIdEditText)
-        val localKeyEditText = findViewById<EditText>(R.id.localKeyEditText)
+        val ipEditText =
+            findViewById<EditText>(R.id.ipEditText)
 
-        val onThresholdEditText =
-            findViewById<EditText>(R.id.onThresholdEditText)
+        val deviceIdEditText =
+            findViewById<EditText>(R.id.deviceIdEditText)
 
-        val offThresholdEditText =
+        val localKeyEditText =
+            findViewById<EditText>(R.id.localKeyEditText)
+
+        val thresholdEditText =
             findViewById<EditText>(R.id.offThresholdEditText)
 
         val debounceEditText =
@@ -28,48 +30,111 @@ class SettingsActivity : AppCompatActivity() {
         val pollIntervalEditText =
             findViewById<EditText>(R.id.pollIntervalEditText)
 
-        val saveButton = findViewById<Button>(R.id.saveButton)
+        val saveButton =
+            findViewById<Button>(R.id.saveButton)
 
-        val preferences = getSharedPreferences("settings", MODE_PRIVATE)
+        val preferences =
+            getSharedPreferences(
+                "settings",
+                MODE_PRIVATE
+            )
 
         ipEditText.setText(
-            preferences.getString("ip_address", "")
+            preferences.getString(
+                "ip_address",
+                ""
+            )
         )
 
         deviceIdEditText.setText(
-            preferences.getString("device_id", "")
+            preferences.getString(
+                "device_id",
+                ""
+            )
         )
 
         localKeyEditText.setText(
-            preferences.getString("local_key", "")
+            preferences.getString(
+                "local_key",
+                ""
+            )
         )
 
-        onThresholdEditText.setText(
-            preferences.getString("on_threshold", "50")
-        )
-
-        offThresholdEditText.setText(
-            preferences.getString("off_threshold", "8")
+        /*
+         * Una sola soglia.
+         * Se esiste ancora il vecchio valore off_threshold,
+         * lo utilizziamo per non perdere l'impostazione già salvata.
+         * Altrimenti il default è 10 W.
+         */
+        thresholdEditText.setText(
+            preferences.getString(
+                "off_threshold",
+                "10"
+            )
         )
 
         debounceEditText.setText(
-            preferences.getString("debounce_seconds", "90")
+            preferences.getString(
+                "debounce_seconds",
+                "90"
+            )
         )
 
         pollIntervalEditText.setText(
-            preferences.getString("poll_interval", "5")
+            preferences.getString(
+                "poll_interval",
+                "5"
+            )
         )
 
         saveButton.setOnClickListener {
 
+            val threshold =
+                thresholdEditText.text
+                    .toString()
+                    .trim()
+
+            val debounce =
+                debounceEditText.text
+                    .toString()
+                    .trim()
+
+            val pollInterval =
+                pollIntervalEditText.text
+                    .toString()
+                    .trim()
+
             preferences.edit()
-                .putString("ip_address", ipEditText.text.toString().trim())
-                .putString("device_id", deviceIdEditText.text.toString().trim())
-                .putString("local_key", localKeyEditText.text.toString().trim())
-                .putString("on_threshold", onThresholdEditText.text.toString().trim())
-                .putString("off_threshold", offThresholdEditText.text.toString().trim())
-                .putString("debounce_seconds", debounceEditText.text.toString().trim())
-                .putString("poll_interval", pollIntervalEditText.text.toString().trim())
+                .putString(
+                    "ip_address",
+                    ipEditText.text
+                        .toString()
+                        .trim()
+                )
+                .putString(
+                    "device_id",
+                    deviceIdEditText.text
+                        .toString()
+                        .trim()
+                )
+                .putString(
+                    "local_key",
+                    localKeyEditText.text
+                        .toString()
+                        .trim()
+                )
+                .putString(
+                    "off_threshold",
+                    threshold
+                )
+                .putString(
+                    "debounce_seconds",
+                    debounce
+                )
+                .putString(
+                    "poll_interval",
+                    pollInterval
+                )
                 .apply()
 
             finish()
