@@ -303,17 +303,31 @@ class MonitorService : Service() {
                 cycleFinished = true
                 lowSince = 0L
 
-                sendUpdate(
-                    power,
-                    "CICLO TERMINATO",
-                    "Presa collegata"
-                )
+               sendUpdate(
+    power,
+    "CICLO TERMINATO",
+    "Presa collegata"
+)
 
-                updateNotification(power)
+updateNotification(power)
 
-                startAlarm()
+startAlarm()
 
-                showFinishedNotification()
+showFinishedNotification()
+
+val finishIntent =
+    Intent(
+        this,
+        FineCycleActivity::class.java
+    ).apply {
+        addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+    }
+
+startActivity(finishIntent)
 
             } else {
 
