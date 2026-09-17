@@ -76,7 +76,8 @@ class TuyaClient(
         val frame = readMessage()
         val plain = decryptFrame(frame, targetKey)
 
-        return extractPower(plain)
+        val jsonBytes = cleanTuyaPayload(plain)
+        return parsePowerFromJson(jsonBytes)
     }
 
     @Synchronized
@@ -94,7 +95,8 @@ class TuyaClient(
         val frame = readMessage()
         val plain = decryptFrame(frame, targetKey)
 
-        return extractPower(plain)
+        val jsonBytes = cleanTuyaPayload(plain)
+        return parsePowerFromJson(jsonBytes)
     }
 
     private fun ensureConnected() {
@@ -283,7 +285,7 @@ class TuyaClient(
         )
     }
 
-    private fun extractPower(plain: ByteArray): ByteArray {
+    private fun cleanTuyaPayload(plain: ByteArray): ByteArray {
         if (plain.size < 4) {
             throw Exception("Risposta DP troppo corta")
         }
@@ -306,7 +308,7 @@ class TuyaClient(
         return plain.copyOfRange(position, plain.size)
     }
 
-    private fun extractPower(jsonBytes: ByteArray): Double {
+    private fun parsePowerFromJson(jsonBytes: ByteArray): Double {
         val jsonText = String(jsonBytes, Charsets.UTF_8).trim()
         if (jsonText.isEmpty()) {
             throw Exception("Risposta DP senza JSON")
