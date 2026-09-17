@@ -16,13 +16,11 @@ import androidx.core.app.NotificationCompat
 import java.util.Locale
 
 /**
- * Servizio in primo piano ("foreground service") che tiene viva la
- * connessione alla presa anche quando l'app non è aperta o lo schermo
- * è spento.
+ * Servizio in primo piano che monitora la presa e segnala
+ * la fine ciclo quando la potenza resta sotto soglia
+ * per il tempo di debounce impostato.
  *
- * Logica di rilevamento: due soglie (accensione/spegnimento) più un
- * tempo minimo ("debounce") sotto soglia prima di considerare il
- * ciclo davvero finito, per ignorare le micro-pause.
+ * Soglia unica (impostabile nelle Settings).
  */
 class MonitorService : Service() {
 
@@ -37,22 +35,10 @@ class MonitorService : Service() {
         private const val NOTIFICATION_ID_STATUS = 1
         private const val NOTIFICATION_ID_ALERT = 2
 
-        /**
-         * Soglia di "in funzione". Non è (ancora) esposta nelle
-         * Impostazioni: è lo stesso valore già validato nei test
-         * precedenti (50W separa bene standby/pausa da funzionamento
-         * reale per un piccolo elettrodomestico).
-         */
-        private const val ON_THRESHOLD_WATT = 50.0
-
-        /** Attesa breve dopo un errore, per riprendere il monitoraggio
-         *  più in fretta di un normale ciclo di polling. */
+        /** Attesa breve dopo un errore di rete. */
         private const val RETRY_DELAY_MS = 2000L
 
-        /** Quante letture fallite consecutive servono prima di
-         *  mostrare davvero "presa non raggiungibile", per non far
-         *  lampeggiare l'avviso per un singolo blip temporaneo di
-         *  rete che si risolve da solo. */
+        /** Quante letture fallite consecutive prima di mostrare errore. */
         private const val FAILURES_BEFORE_SHOWING_ERROR = 3
 
         @Volatile
@@ -85,8 +71,6 @@ class MonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
-        // Va chiamato SUBITO all'avvio del servizio: se non lo fai in
-        // fretta, Android può terminare il servizio con un crash.
         startForeground(
             NOTIFICATION_ID_STATUS,
             buildStatusNotification("Avvio in corso...")
@@ -105,7 +89,6 @@ class MonitorService : Service() {
     }
 
     override fun onDestroy() {
-
         running = false
         isServiceRunning = false
 
@@ -154,17 +137,12 @@ class MonitorService : Service() {
 
         client = TuyaClient(deviceId, ip, localKey)
 
-        // IN_ATTESA   = in attesa che inizi un ciclo (o appena finito uno)
-        // IN_FUNZIONE = elettrodomestico attivo, in attesa della fine
+        // IN_ATTESA   = in attesa di un ciclo (o appena finito uno)
+        // IN_FUNZIONE = elettrodomestico attivo
         var stato = "IN_ATTESA"
         var inizioPausa: Long? = null
         var failureCount = 0
 
-        // Finestra di polling "veloce": la teniamo attiva per un po'
-        // dopo un sospetto riavvio (o subito dopo una notifica di fine
-        // ciclo, quando è plausibile che parta subito un altro carico),
-        // per intercettare prima il nuovo consumo. Fuori da questa
-        // finestra si torna al polling normale/lento per risparmiare.
         val FINESTRA_VELOCE_MS = 120_000L
         val INTERVALLO_VELOCE_MS = 4_000L
         val INTERVALLO_STANDBY_MS = maxOf(pollIntervalMs, 15_000L)
@@ -179,42 +157,33 @@ class MonitorService : Service() {
                     System.currentTimeMillis() < finestraVelaceFino
 
                 if (inFinestraVeloce) {
-                    // Tentativo sperimentale: chiediamo alla presa di
-                    // aggiornare i suoi valori energetici prima di
-                    // leggerli. Non è garantito che serva a qualcosa
-                    // con questo modello, ma non fa danni (nessuna
-                    // scrittura, solo una richiesta di lettura).
                     client!!.requestDpsRefresh()
                 }
 
                 val potenza = client!!.getPower()
 
                 failureCount = 0
-
-                lastPowerText =
-                    String.format(Locale.US, "%.1f W", potenza)
-
+                lastPowerText = String.format(Locale.US, "%.1f W", potenza)
                 lastConnectionText = "Presa collegata"
 
+                // === SOGLIA UNICA ===
                 when {
-
-                    potenza > ON_THRESHOLD_WATT -> {
+                    potenza > offThreshold -> {
+                        // Ciclo in corso
                         stato = "IN_FUNZIONE"
                         inizioPausa = null
                         lastStatusText = "In funzione"
-                        // Confermato in funzione: non serve più il
-                        // polling veloce, i Watt ora cambiano da soli.
                         finestraVelaceFino = 0L
                     }
 
-                    potenza < offThreshold -> {
-
+                    // potenza <= offThreshold
+                    else -> {
                         if (stato == "IN_FUNZIONE") {
-
                             val inizio = inizioPausa
 
                             if (inizio == null) {
                                 inizioPausa = System.currentTimeMillis()
+                                lastStatusText = "Possibile fine ciclo..."
                             } else if (
                                 System.currentTimeMillis() - inizio
                                 >= debounceSeconds * 1000L
@@ -222,28 +191,14 @@ class MonitorService : Service() {
                                 sendFineCicloNotification(prefs)
                                 stato = "IN_ATTESA"
                                 inizioPausa = null
-                                // Resta scritto "Fine ciclo" (non torna a
-                                // "In attesa") finché non riparte un nuovo
-                                // ciclo vero, così si vede a colpo d'occhio
-                                // che è stato notificato.
                                 lastStatusText = "Fine ciclo"
-                                // Riattiviamo il polling veloce: è
-                                // plausibile che parta subito un altro
-                                // carico (es. altro lavaggio).
                                 finestraVelaceFino =
                                     System.currentTimeMillis() + FINESTRA_VELOCE_MS
                             }
-                        }
-                    }
-
-                    else -> {
-                        // Zona intermedia tra le due soglie: qualcosa si
-                        // sta muovendo ma non è ancora confermato.
-                        // Manteniamo/riattiviamo il polling veloce per
-                        // non perdere l'inizio di un ciclo vero.
-                        if (stato != "IN_FUNZIONE") {
-                            finestraVelaceFino =
-                                System.currentTimeMillis() + FINESTRA_VELOCE_MS
+                        } else {
+                            // Standby / in attesa di un nuovo ciclo
+                            lastStatusText = "In attesa"
+                            inizioPausa = null
                         }
                     }
                 }
@@ -260,13 +215,10 @@ class MonitorService : Service() {
                 Thread.sleep(prossimoIntervallo)
 
             } catch (_: InterruptedException) {
-
                 break
-
             } catch (e: Exception) {
 
                 client?.close()
-
                 failureCount++
 
                 if (failureCount >= FAILURES_BEFORE_SHOWING_ERROR) {
@@ -360,8 +312,6 @@ class MonitorService : Service() {
 
             manager.createNotificationChannel(statusChannel)
 
-            // Pattern vibrazione: beep-beep-pausa-beep-beep, in millisecondi
-            // (il primo valore è un ritardo iniziale, poi vibra/pausa alternati)
             val alarmVibrationPattern =
                 longArrayOf(0, 250, 150, 250, 700, 250, 150, 250)
 
@@ -387,7 +337,7 @@ class MonitorService : Service() {
                     vibrationPattern = alarmVibrationPattern
                     enableLights(true)
                     lightColor = Color.RED
-                    description = "Suono ripetuto, vibrazione e LED a fine ciclo"
+                    description = "Suono personalizzato, vibrazione e LED a fine ciclo"
                 }
 
             val normaleChannel =
