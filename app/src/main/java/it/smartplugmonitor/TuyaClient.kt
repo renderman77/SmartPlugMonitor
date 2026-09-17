@@ -108,9 +108,16 @@ class TuyaClient(private val deviceId: String, private val ipAddress: String, pr
         return (if (raw is Number) raw.toDouble() else raw.toString().toDouble()) / 10.0
     }
 
-    private fun buildHeader(seq: Int, cmd: Int, len: Int) = ByteArray(14).orEmpty().apply {
-        writeInt(this, 2, seq); writeInt(this, 6, cmd); writeInt(this, 10, len)
+    private fun buildHeader(seq: Int, cmd: Int, len: Int): ByteArray {
+        val header = ByteArray(14)
+        header[0] = 0
+        header[1] = 0
+        writeInt(header, 2, seq)
+        writeInt(header, 6, cmd)
+        writeInt(header, 10, len)
+        return header
     }
+
     private fun aesGcmEncrypt(k: ByteArray, iv: ByteArray, p: ByteArray, a: ByteArray?) = Cipher.getInstance("AES/GCM/NoPadding").run {
         init(Cipher.ENCRYPT_MODE, SecretKeySpec(k, "AES"), GCMParameterSpec(128, iv)); a?.let { updateAAD(it) }; doFinal(p)
     }
