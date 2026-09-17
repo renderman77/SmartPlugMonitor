@@ -160,9 +160,32 @@ class MonitorService : Service() {
         var inizioPausa: Long? = null
         var failureCount = 0
 
+        // Finestra di polling "veloce": la teniamo attiva per un po'
+        // dopo un sospetto riavvio (o subito dopo una notifica di fine
+        // ciclo, quando è plausibile che parta subito un altro carico),
+        // per intercettare prima il nuovo consumo. Fuori da questa
+        // finestra si torna al polling normale/lento per risparmiare.
+        val FINESTRA_VELOCE_MS = 120_000L
+        val INTERVALLO_VELOCE_MS = 4_000L
+        val INTERVALLO_STANDBY_MS = maxOf(pollIntervalMs, 15_000L)
+
+        var finestraVelaceFino: Long = System.currentTimeMillis() + FINESTRA_VELOCE_MS
+
         while (running) {
 
             try {
+
+                val inFinestraVeloce =
+                    System.currentTimeMillis() < finestraVelaceFino
+
+                if (inFinestraVeloce) {
+                    // Tentativo sperimentale: chiediamo alla presa di
+                    // aggiornare i suoi valori energetici prima di
+                    // leggerli. Non è garantito che serva a qualcosa
+                    // con questo modello, ma non fa danni (nessuna
+                    // scrittura, solo una richiesta di lettura).
+                    client!!.requestDpsRefresh()
+                }
 
                 val potenza = client!!.getPower()
 
@@ -179,6 +202,9 @@ class MonitorService : Service() {
                         stato = "IN_FUNZIONE"
                         inizioPausa = null
                         lastStatusText = "In funzione"
+                        // Confermato in funzione: non serve più il
+                        // polling veloce, i Watt ora cambiano da soli.
+                        finestraVelaceFino = 0L
                     }
 
                     potenza < offThreshold -> {
@@ -201,17 +227,37 @@ class MonitorService : Service() {
                                 // ciclo vero, così si vede a colpo d'occhio
                                 // che è stato notificato.
                                 lastStatusText = "Fine ciclo"
+                                // Riattiviamo il polling veloce: è
+                                // plausibile che parta subito un altro
+                                // carico (es. altro lavaggio).
+                                finestraVelaceFino =
+                                    System.currentTimeMillis() + FINESTRA_VELOCE_MS
                             }
                         }
                     }
 
-                    // else: zona intermedia tra le due soglie.
-                    // Non tocchiamo inizioPausa né lo stato mostrato.
+                    else -> {
+                        // Zona intermedia tra le due soglie: qualcosa si
+                        // sta muovendo ma non è ancora confermato.
+                        // Manteniamo/riattiviamo il polling veloce per
+                        // non perdere l'inizio di un ciclo vero.
+                        if (stato != "IN_FUNZIONE") {
+                            finestraVelaceFino =
+                                System.currentTimeMillis() + FINESTRA_VELOCE_MS
+                        }
+                    }
                 }
 
                 updateStatusNotification()
 
-                Thread.sleep(pollIntervalMs)
+                val prossimoIntervallo =
+                    if (System.currentTimeMillis() < finestraVelaceFino) {
+                        INTERVALLO_VELOCE_MS
+                    } else {
+                        INTERVALLO_STANDBY_MS
+                    }
+
+                Thread.sleep(prossimoIntervallo)
 
             } catch (_: InterruptedException) {
 
@@ -338,7 +384,7 @@ class MonitorService : Service() {
                 ).apply {
                     setSound(alarmSoundUri, audioAttributes)
                     enableVibration(true)
-                    vibrationPattern = vibrationPattern
+                    vibrationPattern = alarmVibrationPattern
                     enableLights(true)
                     lightColor = Color.RED
                     description = "Suono ripetuto, vibrazione e LED a fine ciclo"
@@ -364,7 +410,7 @@ class MonitorService : Service() {
                 ).apply {
                     setSound(null, null)
                     enableVibration(true)
-                    vibrationPattern = vibrationPattern
+                    vibrationPattern = alarmVibrationPattern
                     description = "Solo vibrazione, senza suono, a fine ciclo"
                 }
 
