@@ -45,7 +45,6 @@ class MonitorService : Service() {
     private var workerThread: Thread? = null
     private var client: TuyaClient? = null
 
-    /** True se è stata mostrata una notifica di fine ciclo ancora attiva. */
     @Volatile private var alertAttiva = false
 
     override fun onCreate() {
@@ -76,7 +75,6 @@ class MonitorService : Service() {
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(NOTIFICATION_ID_STATUS)
-        // Non cancelliamo l'alert di fine ciclo: l'utente può chiuderlo dopo
 
         super.onDestroy()
     }
@@ -98,68 +96,59 @@ class MonitorService : Service() {
             return
         }
 
-        val offThreshold =
-            (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
+        val offThreshold = (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
+        val debounceSeconds = (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-        val debounceSeconds =
-            (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
-
-        // Intervallo di lettura: minimo 2 secondi per ridurre il lag percepito
-        val pollIntervalMs =
-            ((prefs.getString("poll_interval", "3") ?: "3")
-                .toLongOrNull()
-                ?.coerceAtLeast(2) ?: 3L) * 1000L
+        val userPollIntervalMs = ((prefs.getString("poll_interval", "3") ?: "3")
+            .toLongOrNull()?.coerceAtLeast(2) ?: 3L) * 1000L
 
         client = TuyaClient(deviceId, ip, localKey)
 
-        // IN_ATTESA / IN_FUNZIONE
         var stato = "IN_ATTESA"
         var inizioSottoSoglia: Long? = null
         var failureCount = 0
 
         while (running) {
-            try {
-                // Best-effort: chiedi aggiornamento DP energetici
-                try {
-                    client!!.requestDpsRefresh()
-                } catch (_: Exception) {
-                }
+            var dynamicSleepTime = userPollIntervalMs
 
+            try {
                 val potenza = client!!.getPower()
                 failureCount = 0
                 lastPowerText = String.format(Locale.US, "%.1f W", potenza)
                 lastConnectionText = "Presa collegata"
 
                 if (potenza > offThreshold) {
-                    // Consumo sopra soglia = ciclo in corso
                     if (stato != "IN_FUNZIONE") {
                         stato = "IN_FUNZIONE"
+                        dynamicSleepTime = 1000L 
                     }
                     inizioSottoSoglia = null
                     lastStatusText = "In funzione"
 
-                    // Se c'era una notifica di fine ciclo e riparte un carico,
-                    // l'operatore è davanti: chiudi la notifica e continua.
                     if (alertAttiva) {
                         cancelFineCicloNotification()
                         alertAttiva = false
                     }
                 } else {
-                    // Sotto soglia
                     if (stato == "IN_FUNZIONE") {
                         val t0 = inizioSottoSoglia
                         if (t0 == null) {
                             inizioSottoSoglia = System.currentTimeMillis()
-                            // Nessun testo intermedio: resta "In funzione"
                             lastStatusText = "In funzione"
-                        } else if (System.currentTimeMillis() - t0 >= debounceSeconds * 1000L) {
-                            sendFineCicloNotification(prefs)
-                            alertAttiva = true
-                            stato = "IN_ATTESA"
-                            inizioSottoSoglia = null
-                            lastStatusText = "Fine ciclo"
+                            dynamicSleepTime = 1000L 
                         } else {
-                            lastStatusText = "In funzione"
+                            val elapsedSeconds = (System.currentTimeMillis() - t0) / 1000L
+                            if (elapsedSeconds >= debounceSeconds) {
+                                sendFineCicloNotification(prefs)
+                                alertAttiva = true
+                                stato = "IN_ATTESA"
+                                inizioSottoSoglia = null
+                                lastStatusText = "Fine ciclo"
+                            } else {
+                                val rimanenti = debounceSeconds - elapsedSeconds
+                                lastStatusText = "Fine tra ${rimanenti}s"
+                                dynamicSleepTime = 1000L 
+                            }
                         }
                     } else {
                         lastStatusText = "In attesa"
@@ -168,7 +157,7 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
-                Thread.sleep(pollIntervalMs)
+                Thread.sleep(dynamicSleepTime)
 
             } catch (_: InterruptedException) {
                 break
@@ -181,7 +170,7 @@ class MonitorService : Service() {
                     updateStatusNotification()
                 }
                 try {
-                    Thread.sleep(minOf(pollIntervalMs, RETRY_DELAY_MS))
+                    Thread.sleep(minOf(userPollIntervalMs, RETRY_DELAY_MS))
                 } catch (_: InterruptedException) {
                     break
                 }
@@ -191,36 +180,31 @@ class MonitorService : Service() {
 
     private fun sendFineCicloNotification(prefs: android.content.SharedPreferences) {
         val title = prefs.getString("alert_title", "Ciclo terminato") ?: "Ciclo terminato"
-        val message =
-            prefs.getString("alert_message", "Il dispositivo collegato ha terminato.")
-                ?: "Il dispositivo collegato ha terminato."
+        val message = prefs.getString("alert_message", "Il dispositivo collegato ha terminato.")
+            ?: "Il dispositivo collegato ha terminato."
 
         val openApp = Intent(this, MainActivity::class.java)
-        val contentPending =
-            PendingIntent.getActivity(this, 0, openApp, PendingIntent.FLAG_IMMUTABLE)
+        val contentPending = PendingIntent.getActivity(this, 0, openApp, PendingIntent.FLAG_IMMUTABLE)
 
-        // Suono di allarme di sistema (funziona anche senza file raw)
-        val alarmUri: Uri =
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val alarmUri: Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
         val vibration = longArrayOf(0, 500, 200, 500, 200, 500, 700, 500)
 
-        val notification =
-            NotificationCompat.Builder(this, CHANNEL_ALERT_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setContentIntent(contentPending)
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setSound(alarmUri)
-                .setVibrate(vibration)
-                .setLights(Color.RED, 500, 500)
-                .setAutoCancel(true) // tap = chiude (e interrompe suono su molti dispositivi)
-                .setOnlyAlertOnce(false)
-                .build()
+        val notification = NotificationCompat.Builder(this, CHANNEL_ALERT_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setContentIntent(contentPending)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSound(alarmUri)
+            .setVibrate(vibration)
+            .setLights(Color.RED, 500, 500)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .build()
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID_ALERT, notification)
@@ -233,8 +217,7 @@ class MonitorService : Service() {
 
     private fun buildStatusNotification(text: String): Notification {
         val openApp = Intent(this, MainActivity::class.java)
-        val pending =
-            PendingIntent.getActivity(this, 0, openApp, PendingIntent.FLAG_IMMUTABLE)
+        val pending = PendingIntent.getActivity(this, 0, openApp, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
             .setSmallIcon(android.R.drawable.ic_menu_preferences)
@@ -260,42 +243,37 @@ class MonitorService : Service() {
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // ID canali nuovi (v2): così non restano le impostazioni dei canali vecchi
-        val status =
-            NotificationChannel(
-                CHANNEL_STATUS_ID,
-                "Stato monitoraggio",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Notifica permanente mentre il monitoraggio è attivo"
-                setSound(null, null)
-                enableVibration(false)
-            }
+        val status = NotificationChannel(
+            CHANNEL_STATUS_ID,
+            "Stato monitoraggio",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Notifica permanente mentre il monitoraggio è attivo"
+            setSound(null, null)
+            enableVibration(false)
+        }
 
-        val alarmUri =
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
-        val audioAttrs =
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
+        val audioAttrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
 
-        val alert =
-            NotificationChannel(
-                CHANNEL_ALERT_ID,
-                "Fine ciclo",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Avviso quando il consumo scende sotto soglia"
-                setSound(alarmUri, audioAttrs)
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 700, 500)
-                enableLights(true)
-                lightColor = Color.RED
-                setBypassDnd(true)
-            }
+        val alert = NotificationChannel(
+            CHANNEL_ALERT_ID,
+            "Fine ciclo",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Avviso quando il consumo scende sotto soglia"
+            setSound(alarmUri, audioAttrs)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 700, 500)
+            enableLights(true)
+            lightColor = Color.RED
+            setBypassDnd(true)
+        }
 
         manager.createNotificationChannel(status)
         manager.createNotificationChannel(alert)
