@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -108,10 +107,36 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Notifica di fine ciclo"
+            android:text="Testo notifica fine ciclo"
             android:textSize="18sp"
             android:textStyle="bold"
-            android:layout_marginTop="32dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/alertTitleEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Titolo (es. Ciclo terminato)"
+            android:inputType="text"
+            android:singleLine="true"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/alertMessageEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Messaggio (es. Il dispositivo ha terminato)"
+            android:inputType="textMultiLine"
+            android:minLines="2"
+            android:layout_marginBottom="28dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Stile notifica"
+            android:textSize="18sp"
+            android:textStyle="bold"
             android:layout_marginBottom="12dp" />
 
         <RadioGroup
@@ -125,20 +150,19 @@
                 android:id="@+id/styleAllarme"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Allarme (suono ripetuto + vibrazione + LED)" />
+                android:text="Allarme (suono + vibrazione + LED)" />
 
             <RadioButton
                 android:id="@+id/styleNormale"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Normale (suono di notifica standard)" />
+                android:text="Normale (suono di sistema)" />
 
             <RadioButton
                 android:id="@+id/styleVibrazione"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Solo vibrazione (senza suono)" />
-
+                android:text="Solo vibrazione" />
         </RadioGroup>
 
         <Button
@@ -148,5 +172,4 @@
             android:text="SALVA" />
 
     </LinearLayout>
-
 </ScrollView>
