@@ -24,6 +24,7 @@ class TuyaClient(
         private const val CMD_SESSION_RESPONSE = 0x04
         private const val CMD_SESSION_FINISH = 0x05
         private const val CMD_DP_QUERY_NEW = 0x10
+        private const val CMD_UPDATEDPS = 0x12
 
         private val PREFIX =
             byteArrayOf(
@@ -93,6 +94,56 @@ class TuyaClient(
             )
 
         return extractPower(plain)
+    }
+
+    /**
+     * Chiede alla presa di aggiornare i Data Point energetici
+     * (comando Tuya "UPDATEDPS", 0x12) prima di una lettura, nel
+     * tentativo di forzare un valore di potenza più fresco invece di
+     * uno eventualmente cacheato dal firmware.
+     *
+     * NOTA: è un tentativo, non una garanzia — non è confermato che
+     * questo modello di presa consideri questo comando per ricalcolare
+     * la potenza più spesso. Non lancia eccezioni verso il chiamante:
+     * in caso di problemi, la successiva chiamata a getPower() normale
+     * prosegue comunque.
+     */
+    @Synchronized
+    fun requestDpsRefresh() {
+
+        try {
+
+            ensureConnected()
+
+            val dpIds = org.json.JSONArray()
+            dpIds.put(18)
+            dpIds.put(19)
+            dpIds.put(20)
+
+            val payload =
+                JSONObject()
+                    .put("dpId", dpIds)
+                    .toString()
+                    .toByteArray(Charsets.UTF_8)
+
+            sendMessage(
+                CMD_UPDATEDPS,
+                payload,
+                sessionKey
+                    ?: throw Exception(
+                        "Sessione Tuya non disponibile"
+                    )
+            )
+
+            // Leggiamo e scartiamo la risposta di conferma: non
+            // assumiamo che contenga già i valori aggiornati, la
+            // lettura vera arriva subito dopo con getPower().
+            readMessage()
+
+        } catch (_: Exception) {
+            // Best-effort: se questo comando fallisce, il polling
+            // normale con getPower() prosegue comunque.
+        }
     }
 
     private fun ensureConnected() {
