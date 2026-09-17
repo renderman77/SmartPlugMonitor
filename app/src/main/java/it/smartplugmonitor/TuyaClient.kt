@@ -71,13 +71,21 @@ class TuyaClient(
 
         val targetKey = sessionKey ?: throw Exception("Sessione Tuya non disponibile")
 
-        sendMessage(CMD_UPDATEDPS, payload, targetKey)
+        // 1. Inviamo il comando 0x12 per forzare il refresh hardware interno alla presa
+        try {
+            sendMessage(CMD_UPDATEDPS, payload, targetKey)
+            val frame = readMessage()
+            val plain = decryptFrame(frame, targetKey)
+            val jsonBytes = cleanTuyaPayload(plain)
+            return parsePowerFromJson(jsonBytes)
+        } catch (_: Exception) {
+            // Se il comando 0x12 restituisce dati vuoti o fallisce il parsing JSON,
+            // non andiamo in crash ma passiamo subito al recupero passivo standard qui sotto
+        }
 
-        val frame = readMessage()
-        val plain = decryptFrame(frame, targetKey)
-
-        val jsonBytes = cleanTuyaPayload(plain)
-        return parsePowerFromJson(jsonBytes)
+        // 2. Recupero passivo: se la presa non ha sputato il JSON direttamente sul comando 0x12,
+        // leggiamo lo stato aggiornato tramite CMD_DP_QUERY_NEW
+        return getPowerPassive()
     }
 
     @Synchronized
