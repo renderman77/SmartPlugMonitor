@@ -10,8 +10,8 @@ import java.util.Locale
 
 class MonitorService : Service() {
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v7"
-        private const val CHANNEL_ALERT_ID = "monitor_alert_v7"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v8"
+        private const val CHANNEL_ALERT_ID = "monitor_alert_v8"
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
         @Volatile var lastStatusText = "In attesa di avvio"
@@ -22,11 +22,15 @@ class MonitorService : Service() {
     private var client: TuyaClient? = null
     @Volatile private var alertAttiva = false
     private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var forzatoFineCiclo = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_ALARM_ACTION") {
             cancelFineCicloNotification()
             alertAttiva = false
+            forzatoFineCiclo = false // L'utente ha premuto OK: sblocca lo stato e torna in attesa
+            lastStatusText = "In attesa"
+            updateStatusNotification()
             return START_STICKY
         }
         startForeground(1, buildStatusNotification("Avvio in corso..."))
@@ -75,6 +79,7 @@ class MonitorService : Service() {
                 if (potenza > offThreshold) {
                     stato = "IN_FUNZIONE"
                     inizioSottoSoglia = null
+                    forzatoFineCiclo = false // Se riparte, resetta il blocco visivo
                     lastStatusText = "In funzione"
                     if (alertAttiva) { cancelFineCicloNotification(); alertAttiva = false }
                 } else {
@@ -87,12 +92,15 @@ class MonitorService : Service() {
                         } else if (System.currentTimeMillis() - t0 >= debounceSeconds * 1000L) {
                             sendFineCicloNotification(prefs)
                             alertAttiva = true; stato = "IN_ATTESA"; inizioSottoSoglia = null
+                            forzatoFineCiclo = true // Attiva il blocco visivo di fine ciclo
                             lastStatusText = "Fine ciclo"
                         } else {
                             lastStatusText = "In funzione"
                         }
                     } else {
-                        lastStatusText = "In attesa"; inizioSottoSoglia = null
+                        // Se l'allarme è attivo e non è stato premuto OK, mantiene la scritta "Fine ciclo"
+                        lastStatusText = if (forzatoFineCiclo) "Fine ciclo" else "In attesa"
+                        inizioSottoSoglia = null
                     }
                 }
                 updateStatusNotification()
@@ -125,7 +133,6 @@ class MonitorService : Service() {
             .build()
             
         notification.flags = notification.flags or Notification.FLAG_INSISTENT
-
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(2, notification)
     }
 
