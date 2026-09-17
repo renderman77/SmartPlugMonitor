@@ -10,8 +10,8 @@ import java.util.Locale
 
 class MonitorService : Service() {
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v5"
-        private const val CHANNEL_ALERT_ID = "monitor_alert_v5"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v6"
+        private const val CHANNEL_ALERT_ID = "monitor_alert_v6"
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
         @Volatile var lastStatusText = "In attesa di avvio"
@@ -83,7 +83,7 @@ class MonitorService : Service() {
                         val t0 = inizioSottoSoglia
                         if (t0 == null) {
                             inizioSottoSoglia = System.currentTimeMillis()
-                            lastStatusText = "In fonctione"
+                            lastStatusText = "In funzione"
                         } else if (System.currentTimeMillis() - t0 >= debounceSeconds * 1000L) {
                             sendFineCicloNotification(prefs)
                             alertAttiva = true; stato = "IN_ATTESA"; inizioSottoSoglia = null
@@ -119,11 +119,14 @@ class MonitorService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setSound(soundUri)
-            .setOngoing(true) // Mantiene la notifica attiva impedendo che si fermi da sola
-            .setFlags(Notification.FLAG_INSISTENT) // Forza la riproduzione del suono in LOOP continuo stile sveglia
+            .setOngoing(true)
             .setAutoCancel(false)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "OK", stopPendingIntent)
             .build()
+            
+        // Applica il flag di ripetizione infinita direttamente sull'oggetto notifica costruito
+        notification.flags = notification.flags or Notification.FLAG_INSISTENT
+
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(2, notification)
     }
 
@@ -139,15 +142,15 @@ class MonitorService : Service() {
     }
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as Manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(NotificationChannel(CHANNEL_STATUS_ID, "Stato", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null); enableVibration(false) })
         
         val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ALERT_ID, "Fine ciclo", NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(soundUri, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             setBypassDnd(true)
-            enableLights(false) // Pulizia opzioni led obsolete
-            enableVibration(false) // Pulizia opzioni vibrazione non funzionanti
+            enableLights(false)
+            enableVibration(false)
         })
     }
 }
