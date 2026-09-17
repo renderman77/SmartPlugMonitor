@@ -10,8 +10,8 @@ import java.util.Locale
 
 class MonitorService : Service() {
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v2"
-        private const val CHANNEL_ALERT_ID = "monitor_alert_v2"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v4"
+        private const val CHANNEL_ALERT_ID = "monitor_alert_v4"
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
         @Volatile var lastStatusText = "In attesa di avvio"
@@ -21,6 +21,7 @@ class MonitorService : Service() {
     private var workerThread: Thread? = null
     private var client: TuyaClient? = null
     @Volatile private var alertAttiva = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_ALARM_ACTION") {
@@ -30,8 +31,12 @@ class MonitorService : Service() {
         }
         startForeground(1, buildStatusNotification("Avvio in corso..."))
         if (workerThread?.isAlive == true) return START_STICKY
-        running = true
-        isServiceRunning = true
+        
+        // Evita il delay a schermo spento mantenendo la CPU attiva in modo blando
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SmartPlugMonitor::WakeLock").apply { acquire(15 * 60 * 1000L) }
+        
+        running = true; isServiceRunning = true
         workerThread = Thread { runMonitorLoop() }.also { it.start() }
         return START_STICKY
     }
@@ -40,6 +45,7 @@ class MonitorService : Service() {
         running = false; isServiceRunning = false
         workerThread?.interrupt(); workerThread = null
         client?.close(); client = null
+        if (wakeLock?.isHeld == true) wakeLock?.release()
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(1)
         super.onDestroy()
     }
@@ -55,23 +61,28 @@ class MonitorService : Service() {
         }
         val offThreshold = (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
         val debounceSeconds = (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
-        val userPollMs = ((prefs.getString("poll_interval", "3") ?: "3").toLongOrNull()?.coerceAtLeast(2) ?: 3L) * 1000L
+        
+        // Polling di base conservativo impostato a 10 secondi per non stressare la presa
+        val basePollMs = 10000L
         client = TuyaClient(deviceId, ip, localKey)
         var stato = "IN_ATTESA"; var inizioSottoSoglia: Long? = null
 
         while (running) {
-            var sleepTime = userPollMs
+            var sleepTime = basePollMs
             try {
                 val potenza = client!!.getPower()
                 lastPowerText = String.format(Locale.US, "%.1f W", potenza)
                 lastConnectionText = "Presa collegata"
+                
                 if (potenza > offThreshold) {
-                    if (stato != "IN_FUNZIONE") { stato = "IN_FUNZIONE"; sleepTime = 1000L }
-                    inizioSottoSoglia = null; lastStatusText = "In funzione"
+                    stato = "IN_FUNZIONE"
+                    inizioSottoSoglia = null
+                    lastStatusText = "In funzione"
                     if (alertAttiva) { cancelFineCicloNotification(); alertAttiva = false }
                 } else {
                     if (stato == "IN_FUNZIONE") {
-                        sleepTime = 1000L // Polling a 1 secondo fisso in discesa
+                        // Polling prudente a 3 secondi solo durante la discesa per intercettare lo sblocco del firmware
+                        sleepTime = 3000L 
                         val t0 = inizioSottoSoglia
                         if (t0 == null) {
                             inizioSottoSoglia = System.currentTimeMillis()
@@ -81,7 +92,7 @@ class MonitorService : Service() {
                             alertAttiva = true; stato = "IN_ATTESA"; inizioSottoSoglia = null
                             lastStatusText = "Fine ciclo"
                         } else {
-                            lastStatusText = "In funzione" // Testo fisso pulito senza countdown
+                            lastStatusText = "In funzione" // Mantiene il testo pulito richiesto
                         }
                     } else {
                         lastStatusText = "In attesa"; inizioSottoSoglia = null
@@ -91,29 +102,29 @@ class MonitorService : Service() {
                 Thread.sleep(sleepTime)
             } catch (_: InterruptedException) { break } catch (e: Exception) {
                 client?.close()
-                try { Thread.sleep(minOf(userPollMs, 2000L)) } catch (_: InterruptedException) { break }
+                try { Thread.sleep(5000L) } catch (_: InterruptedException) { break }
             }
         }
     }
 
     private fun sendFineCicloNotification(prefs: SharedPreferences) {
         val title = prefs.getString("alert_title", "Ciclo terminato") ?: "Ciclo terminato"
-        val message = prefs.getString("alert_message", "Terminato.") ?: "Terminato."
-        
-        // Intent per il tasto OK che ferma l'allarme
+        val message = prefs.getString("alert_message", "Il dispositivo ha terminato.") ?: "Il dispositivo ha terminato."
         val stopIntent = Intent(this, MonitorService::class.java).apply { action = "STOP_ALARM_ACTION" }
         val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        
+        // Collega il cicalino personalizzato alarm_beep.mp3 presente in res/raw
+        val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
 
-        val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERT_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title).setContentText(message)
             .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setSound(alarmUri)
+            .setSound(soundUri)
             .setAutoCancel(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "OK", stopPendingIntent) // Bottone OK
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "OK", stopPendingIntent)
             .build()
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(2, notification)
     }
@@ -132,9 +143,13 @@ class MonitorService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(NotificationChannel(CHANNEL_STATUS_ID, "Stato", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null); enableVibration(false) })
+        
+        val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ALERT_ID, "Fine ciclo", NotificationManager.IMPORTANCE_HIGH).apply {
-            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            setSound(soundUri, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             enableLights(true); lightColor = Color.RED; setBypassDnd(true)
+            enableVibration(true) // Attiva la vibrazione nativa gestita dal sistema Android
+            vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 400)
         })
     }
 }
