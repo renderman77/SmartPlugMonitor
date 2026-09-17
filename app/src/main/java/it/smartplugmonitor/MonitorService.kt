@@ -10,8 +10,8 @@ import java.util.Locale
 
 class MonitorService : Service() {
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v6"
-        private const val CHANNEL_ALERT_ID = "monitor_alert_v6"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v7"
+        private const val CHANNEL_ALERT_ID = "monitor_alert_v7"
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
         @Volatile var lastStatusText = "In attesa di avvio"
@@ -124,7 +124,6 @@ class MonitorService : Service() {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "OK", stopPendingIntent)
             .build()
             
-        // Applica il flag di ripetizione infinita direttamente sull'oggetto notifica costruito
         notification.flags = notification.flags or Notification.FLAG_INSISTENT
 
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(2, notification)
@@ -142,7 +141,7 @@ class MonitorService : Service() {
     }
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as Manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(NotificationChannel(CHANNEL_STATUS_ID, "Stato", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null); enableVibration(false) })
         
         val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
