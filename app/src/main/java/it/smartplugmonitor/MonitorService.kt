@@ -10,8 +10,8 @@ import java.util.Locale
 
 class MonitorService : Service() {
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v4"
-        private const val CHANNEL_ALERT_ID = "monitor_alert_v4"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v5"
+        private const val CHANNEL_ALERT_ID = "monitor_alert_v5"
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
         @Volatile var lastStatusText = "In attesa di avvio"
@@ -32,7 +32,6 @@ class MonitorService : Service() {
         startForeground(1, buildStatusNotification("Avvio in corso..."))
         if (workerThread?.isAlive == true) return START_STICKY
         
-        // Evita il delay a schermo spento mantenendo la CPU attiva in modo blando
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SmartPlugMonitor::WakeLock").apply { acquire(15 * 60 * 1000L) }
         
@@ -62,7 +61,6 @@ class MonitorService : Service() {
         val offThreshold = (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
         val debounceSeconds = (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
         
-        // Polling di base conservativo impostato a 10 secondi per non stressare la presa
         val basePollMs = 10000L
         client = TuyaClient(deviceId, ip, localKey)
         var stato = "IN_ATTESA"; var inizioSottoSoglia: Long? = null
@@ -81,18 +79,17 @@ class MonitorService : Service() {
                     if (alertAttiva) { cancelFineCicloNotification(); alertAttiva = false }
                 } else {
                     if (stato == "IN_FUNZIONE") {
-                        // Polling prudente a 3 secondi solo durante la discesa per intercettare lo sblocco del firmware
                         sleepTime = 3000L 
                         val t0 = inizioSottoSoglia
                         if (t0 == null) {
                             inizioSottoSoglia = System.currentTimeMillis()
-                            lastStatusText = "In funzione"
+                            lastStatusText = "In fonctione"
                         } else if (System.currentTimeMillis() - t0 >= debounceSeconds * 1000L) {
                             sendFineCicloNotification(prefs)
                             alertAttiva = true; stato = "IN_ATTESA"; inizioSottoSoglia = null
                             lastStatusText = "Fine ciclo"
                         } else {
-                            lastStatusText = "In funzione" // Mantiene il testo pulito richiesto
+                            lastStatusText = "In funzione"
                         }
                     } else {
                         lastStatusText = "In attesa"; inizioSottoSoglia = null
@@ -113,7 +110,6 @@ class MonitorService : Service() {
         val stopIntent = Intent(this, MonitorService::class.java).apply { action = "STOP_ALARM_ACTION" }
         val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         
-        // Collega il cicalino personalizzato alarm_beep.mp3 presente in res/raw
         val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERT_ID)
@@ -123,7 +119,9 @@ class MonitorService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setSound(soundUri)
-            .setAutoCancel(true)
+            .setOngoing(true) // Mantiene la notifica attiva impedendo che si fermi da sola
+            .setFlags(Notification.FLAG_INSISTENT) // Forza la riproduzione del suono in LOOP continuo stile sveglia
+            .setAutoCancel(false)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "OK", stopPendingIntent)
             .build()
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(2, notification)
@@ -147,9 +145,9 @@ class MonitorService : Service() {
         val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ALERT_ID, "Fine ciclo", NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(soundUri, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-            enableLights(true); lightColor = Color.RED; setBypassDnd(true)
-            enableVibration(true) // Attiva la vibrazione nativa gestita dal sistema Android
-            vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 400)
+            setBypassDnd(true)
+            enableLights(false) // Pulizia opzioni led obsolete
+            enableVibration(false) // Pulizia opzioni vibrazione non funzionanti
         })
     }
 }
