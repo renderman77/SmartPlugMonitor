@@ -4,7 +4,6 @@ import android.app.*
 import android.content.*
 import android.media.*
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.*
 import androidx.core.app.NotificationCompat
 import java.util.Locale
@@ -23,9 +22,9 @@ class MonitorService : Service() {
 
     @Volatile private var running = false
     private var workerThread: Thread? = null
+    private var client: TuyaClient? = null
     @Volatile private var cycleFinishedLocked = false
     private var alarmPlayer: MediaPlayer? = null
-    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -38,14 +37,6 @@ class MonitorService : Service() {
 
         if (workerThread?.isAlive == true) {
             return START_STICKY
-        }
-
-        try {
-            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
-                acquire()
-            }
-        } catch (_: Exception) {
         }
 
         running = true
@@ -67,15 +58,10 @@ class MonitorService : Service() {
         workerThread?.interrupt()
         workerThread = null
 
-        stopAlarmSound()
+        client?.close()
+        client = null
 
-        try {
-            if (wifiLock?.isHeld == true) {
-                wifiLock?.release()
-            }
-        } catch (_: Exception) {
-        }
-        wifiLock = null
+        stopAlarmSound()
 
         lastPowerText = "-- W"
         lastStatusText = "Stopped"
@@ -111,17 +97,19 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
+        // Intervallo fisso standard e pulito (15 secondi)
         val pollIntervalMs = 15000L
+
+        client = TuyaClient(ip, localKey)
+
         var state = "WAITING"
         var belowThresholdSince: Long? = null
 
         while (running) {
-            var client: TuyaClient? = null
 
             try {
-                // Apriamo la connessione da zero ad ogni singolo ciclo per pulire la rete
-                client = TuyaClient(ip, localKey)
-                val power = client.getPower()
+
+                val power = client!!.getPower()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
@@ -162,24 +150,17 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
+                Thread.sleep(pollIntervalMs)
 
             } catch (_: InterruptedException) {
                 break
             } catch (e: Exception) {
-                lastConnectionText = "Connection error, retrying..."
-                updateStatusNotification()
-            } finally {
-                // REGOLA D'ORO: Chiudiamo e distruggiamo SEMPRE il client per liberare la cache della presa
+                client?.close()
                 try {
-                    client?.close()
-                } catch (_: Exception) {}
-                client = null
-            }
-
-            try {
-                Thread.sleep(pollIntervalMs)
-            } catch (_: InterruptedException) {
-                break
+                    Thread.sleep(pollIntervalMs)
+                } catch (_: InterruptedException) {
+                    break
+                }
             }
         }
     }
