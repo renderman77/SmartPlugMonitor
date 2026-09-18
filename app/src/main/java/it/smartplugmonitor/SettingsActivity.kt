@@ -22,7 +22,7 @@ class SettingsActivity : AppCompatActivity() {
         ipEditText.setText(preferences.getString("ip_address", ""))
         localKeyEditText.setText(preferences.getString("local_key", ""))
         thresholdEditText.setText(preferences.getString("off_threshold", "10"))
-        debounceEditText.setText(preferences.getString("debounce_seconds", "90"))
+        debounceEditText.setText(preferences.getString("debounce_seconds", "60"))
 
         saveButton.setOnClickListener {
             preferences.edit()
@@ -31,7 +31,6 @@ class SettingsActivity : AppCompatActivity() {
                 .putString("off_threshold", thresholdEditText.text.toString().trim())
                 .putString("debounce_seconds", debounceEditText.text.toString().trim())
                 .apply()
-
             finish()
         }
     }
