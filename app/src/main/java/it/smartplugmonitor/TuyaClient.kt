@@ -7,7 +7,7 @@ import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.*
 
-class TuyaClient(private val deviceId: String, private val ipAddress: String, private val localKey: String) {
+class TuyaClient(private val ipAddress: String, private val localKey: String) {
     companion object {
         private const val PORT = 6668
         private val PREFIX = byteArrayOf(0, 0, 0x66, 0x99.toByte())
@@ -25,7 +25,7 @@ class TuyaClient(private val deviceId: String, private val ipAddress: String, pr
         ensureConnected()
         val dpIds = org.json.JSONArray().put(18).put(19).put(20)
         val payload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
-        val targetKey = sessionKey ?: throw Exception("Sessione non disponibile")
+        val targetKey = sessionKey ?: throw Exception("Session not available")
         try {
             sendMessage(0x12, payload, targetKey)
             return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
@@ -36,7 +36,7 @@ class TuyaClient(private val deviceId: String, private val ipAddress: String, pr
     @Synchronized fun getPowerPassive(): Double {
         ensureConnected()
         val payload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
-        val targetKey = sessionKey ?: throw Exception("Sessione non disponibile")
+        val targetKey = sessionKey ?: throw Exception("Session not available")
         sendMessage(0x10, payload, targetKey)
         return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
     }
@@ -44,7 +44,7 @@ class TuyaClient(private val deviceId: String, private val ipAddress: String, pr
     private fun ensureConnected() {
         if (socket?.isConnected == true && socket?.isClosed == false && sessionKey != null) return
         close()
-        if (realKey.size != 16) throw Exception("Local Key deve essere di 16 caratteri")
+        if (realKey.size != 16) throw Exception("Local Key must be 16 characters")
         socket = Socket().apply {
             connect(InetSocketAddress(ipAddress, PORT), 2000)
             soTimeout = 2000
@@ -61,9 +61,9 @@ class TuyaClient(private val deviceId: String, private val ipAddress: String, pr
         val handshakePayload = if (responsePlain.size == 52 || (responsePlain.size > 48 && readInt(responsePlain, 0) == 0)) {
             responsePlain.copyOfRange(4, responsePlain.size)
         } else responsePlain
-        if (handshakePayload.size < 48) throw Exception("Payload corto")
+        if (handshakePayload.size < 48) throw Exception("Handshake payload too short")
         val deviceNonce = handshakePayload.copyOfRange(0, 16)
-        if (!handshakePayload.copyOfRange(16, 48).contentEquals(hmacSha256(realKey, clientNonce))) throw Exception("Key errata")
+        if (!handshakePayload.copyOfRange(16, 48).contentEquals(hmacSha256(realKey, clientNonce))) throw Exception("Wrong Local Key")
         sendMessage(0x05, hmacSha256(realKey, deviceNonce), realKey)
         val xorNonce = ByteArray(16) { i -> (clientNonce[i].toInt() xor deviceNonce[i].toInt()).toByte() }
         sessionKey = (clientNonce.copyOfRange(0, 12) + aesGcmEncrypt(realKey, clientNonce.copyOfRange(0, 12), xorNonce, null)).copyOfRange(12, 28)
@@ -80,9 +80,9 @@ class TuyaClient(private val deviceId: String, private val ipAddress: String, pr
     }
 
     private fun readMessage(): ByteArray {
-        val stream = input ?: throw Exception("Connessione assente")
+        val stream = input ?: throw Exception("No connection")
         val prefix = ByteArray(4).also { stream.readFully(it) }
-        if (!prefix.contentEquals(PREFIX)) throw Exception("Prefix errato")
+        if (!prefix.contentEquals(PREFIX)) throw Exception("Invalid frame prefix")
         val header = ByteArray(14).also { stream.readFully(it) }
         val length = readInt(header, 10)
         val body = ByteArray(length).also { stream.readFully(it) }

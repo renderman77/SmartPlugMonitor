@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -35,12 +36,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    // Deve essere registrato come proprietà della classe (non dentro
-    // onCreate), è un requisito di Android per questo tipo di richiesta.
+    // Must be registered as a class property (not inside onCreate),
+    // this is an Android requirement for this kind of request.
     private val notificationPermissionLauncher =
         registerForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) { /* se l'utente nega, semplicemente non arriveranno notifiche */ }
+        ) { /* if denied, notifications simply won't arrive */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,7 +67,7 @@ class MainActivity : AppCompatActivity() {
                 startMonitorService()
             }
 
-            updateToggleButtonLabel()
+            updateToggleButton()
         }
 
         requestNotificationPermissionIfNeeded()
@@ -75,7 +76,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        updateToggleButtonLabel()
+        updateToggleButton()
         uiHandler.post(uiRefreshRunnable)
     }
 
@@ -93,23 +94,26 @@ class MainActivity : AppCompatActivity() {
         stopService(Intent(this, MonitorService::class.java))
     }
 
-    private fun updateToggleButtonLabel() {
+    private fun updateToggleButton() {
 
-        toggleButton.text =
-            if (MonitorService.isServiceRunning) {
-                "Ferma monitoraggio"
-            } else {
-                "Avvia monitoraggio"
-            }
+        if (MonitorService.isServiceRunning) {
+            toggleButton.text = "STOP"
+            toggleButton.setBackgroundColor(Color.parseColor("#C62828"))
+        } else {
+            toggleButton.text = "START"
+            toggleButton.setBackgroundColor(Color.parseColor("#2E7D32"))
+        }
+
+        toggleButton.setTextColor(Color.WHITE)
     }
 
     private fun refreshUiFromService() {
 
-        // Aggiornato anche qui (non solo al click e in onResume):
-        // avvio/arresto del servizio non sono istantanei, quindi il
-        // pulsante deve potersi "autocorreggere" da solo entro un
-        // secondo invece di restare bloccato sulla scritta sbagliata.
-        updateToggleButtonLabel()
+        // Also updated here (not just on click and in onResume):
+        // starting/stopping the service isn't instant, so the button
+        // needs to self-correct within a second instead of getting
+        // stuck on the wrong label/color.
+        updateToggleButton()
 
         powerText.text = MonitorService.lastPowerText
         statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
@@ -120,13 +124,11 @@ class MainActivity : AppCompatActivity() {
                 !MonitorService.isServiceRunning ->
                     android.R.color.darker_gray
 
-                MonitorService.lastStatusText == "In funzione" ->
+                MonitorService.lastStatusText == "Running" ->
                     android.R.color.holo_green_dark
 
-                MonitorService.lastConnectionText.contains(
-                    "non raggiungibile",
-                    ignoreCase = true
-                ) -> android.R.color.holo_red_dark
+                MonitorService.lastStatusText == "Cycle finished" ->
+                    android.R.color.holo_orange_dark
 
                 else -> android.R.color.holo_blue_dark
             }
@@ -171,10 +173,10 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
 
             } catch (_: Exception) {
-                // Alcuni produttori (es. certi Samsung/Xiaomi) bloccano
-                // questo intent di sistema: in quel caso va disattivato
-                // manualmente il risparmio energetico per l'app dalle
-                // impostazioni del telefono.
+                // Some manufacturers (certain Samsung/Xiaomi builds)
+                // block this system intent: in that case, battery
+                // saving for the app must be disabled manually from
+                // the phone's own settings.
             }
         }
     }

@@ -27,7 +27,7 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Impostazioni"
+            android:contentDescription="Settings"
             android:src="@android:drawable/ic_menu_preferences" />
 
     </LinearLayout>
@@ -40,7 +40,7 @@
         android:id="@+id/statusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="●  MONITORAGGIO ATTIVO"
+        android:text="●  MONITORING ACTIVE"
         android:textColor="#2E7D32"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -65,7 +65,7 @@
         android:id="@+id/connectionText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Presa non ancora configurata"
+        android:text="Plug not configured yet"
         android:textSize="16sp" />
 
     <Space
@@ -76,6 +76,6 @@
         android:id="@+id/toggleButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Avvia monitoraggio" />
+        android:text="START" />
 
 </LinearLayout>
