@@ -42,11 +42,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        tvPower = findViewById(R.id.tv_power)
-        tvStatus = findViewById(R.id.tv_status)
-        tvConnection = findViewById(R.id.tv_connection)
-        btnToggle = findViewById(R.id.btn_toggle)
-        btnSettings = findViewById(R.id.btn_settings)
+        tvPower = findViewById(R.id.tvPower)
+        tvStatus = findViewById(R.id.tvStatus)
+        tvConnection = findViewById(R.id.tvConnection)
+        btnToggle = findViewById(R.id.btnToggle)
+        btnSettings = findViewById(R.id.btnSettings)
 
         btnToggle.setOnClickListener {
             if (MonitorService.isServiceRunning) {
