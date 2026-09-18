@@ -257,7 +257,7 @@ class MonitorService : Service() {
 
     private fun createNotificationChannels() {
 
-        if (Build.VERSION.VERSION_CODES.O == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
         val manager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -274,4 +274,3 @@ class MonitorService : Service() {
         )
     }
 }
-
