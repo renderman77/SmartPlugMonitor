@@ -1,182 +1,121 @@
 package it.smartplugmonitor
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import android.provider.Settings
 import android.widget.Button
-import android.widget.ImageButton
+import android.widget.EditText
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var statusText: TextView
-    private lateinit var powerText: TextView
-    private lateinit var connectionText: TextView
-    private lateinit var toggleButton: Button
+    private lateinit var tvPower: TextView
+    private lateinit var tvStatus: TextView
+    private lateinit var tvConnection: TextView
+    private lateinit var btnToggle: Button
+    private lateinit var btnSettings: Button
 
-    private val uiHandler = Handler(Looper.getMainLooper())
+    private val handler = Handler(Looper.getMainLooper())
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            tvPower.text = MonitorService.lastPowerText
+            tvStatus.text = MonitorService.lastStatusText
+            tvConnection.text = MonitorService.lastConnectionText
 
-    private val uiRefreshRunnable =
-        object : Runnable {
-            override fun run() {
-                refreshUiFromService()
-                uiHandler.postDelayed(this, 1000L)
+            if (MonitorService.isServiceRunning) {
+                btnToggle.text = "Stop Monitor"
+            } else {
+                btnToggle.text = "Start Monitor"
             }
-        }
 
-    // Must be registered as a class property (not inside onCreate),
-    // this is an Android requirement for this kind of request.
-    private val notificationPermissionLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { /* if denied, notifications simply won't arrive */ }
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText)
-        powerText = findViewById(R.id.powerText)
-        connectionText = findViewById(R.id.connectionText)
-        toggleButton = findViewById(R.id.toggleButton)
+        tvPower = findViewById(R.id.tv_power)
+        tvStatus = findViewById(R.id.tv_status)
+        tvConnection = findViewById(R.id.tv_connection)
+        btnToggle = findViewById(R.id.btn_toggle)
+        btnSettings = findViewById(R.id.btn_settings)
 
-        findViewById<ImageButton>(R.id.settingsButton)
-            .setOnClickListener {
-                startActivity(Intent(this, SettingsActivity::class.java))
-            }
-
-        toggleButton.setOnClickListener {
-
+        btnToggle.setOnClickListener {
             if (MonitorService.isServiceRunning) {
-                stopMonitorService()
+                val intent = Intent(this, MonitorService::class.class.java)
+                stopService(intent)
             } else {
-                requestNotificationPermissionIfNeeded()
-                startMonitorService()
+                val intent = Intent(this, MonitorService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
             }
-
-            updateToggleButton()
         }
 
-        requestNotificationPermissionIfNeeded()
-        maybeAskIgnoreBatteryOptimizations()
+        btnSettings.setOnClickListener {
+            val intent = Intent(this, SettingsActivity::class.java)
+            startActivity(intent)
+        }
+
+        // Chiede la disattivazione del risparmio energetico all'avvio dell'app
+        checkAndRequestBatteryOptimizations()
     }
 
     override fun onResume() {
         super.onResume()
-        updateToggleButton()
-        uiHandler.post(uiRefreshRunnable)
+        handler.post(updateRunnable)
     }
 
     override fun onPause() {
         super.onPause()
-        uiHandler.removeCallbacks(uiRefreshRunnable)
+        handler.removeCallbacks(updateRunnable)
     }
 
-    private fun startMonitorService() {
-        val intent = Intent(this, MonitorService::class.java)
-        ContextCompat.startForegroundService(this, intent)
-    }
-
-    private fun stopMonitorService() {
-        stopService(Intent(this, MonitorService::class.java))
-    }
-
-    private fun updateToggleButton() {
-
-        if (MonitorService.isServiceRunning) {
-            toggleButton.text = "STOP"
-            toggleButton.setBackgroundColor(Color.parseColor("#C62828"))
-        } else {
-            toggleButton.text = "START"
-            toggleButton.setBackgroundColor(Color.parseColor("#2E7D32"))
-        }
-
-        toggleButton.setTextColor(Color.WHITE)
-    }
-
-    private fun refreshUiFromService() {
-
-        // Also updated here (not just on click and in onResume):
-        // starting/stopping the service isn't instant, so the button
-        // needs to self-correct within a second instead of getting
-        // stuck on the wrong label/color.
-        updateToggleButton()
-
-        powerText.text = MonitorService.lastPowerText
-        statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
-        connectionText.text = MonitorService.lastConnectionText
-
-        val color =
-            when {
-                !MonitorService.isServiceRunning ->
-                    android.R.color.darker_gray
-
-                MonitorService.lastStatusText == "Running" ->
-                    android.R.color.holo_green_dark
-
-                MonitorService.lastStatusText == "Cycle finished" ->
-                    android.R.color.holo_orange_dark
-
-                else -> android.R.color.holo_blue_dark
-            }
-
-        statusText.setTextColor(getColor(color))
-    }
-
-    private fun requestNotificationPermissionIfNeeded() {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-
-            val granted =
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-
-            if (!granted) {
-                notificationPermissionLauncher.launch(
-                    Manifest.permission.POST_NOTIFICATIONS
-                )
-            }
-        }
-    }
-
-    private fun maybeAskIgnoreBatteryOptimizations() {
-
-        val powerManager =
-            getSystemService(Context.POWER_SERVICE) as PowerManager
-
-        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-
-            try {
-
-                val intent =
-                    Intent(
-                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                    ).apply {
-                        data = Uri.parse("package:$packageName")
+    /**
+     * Controlla se l'applicazione è soggetta alle restrizioni della batteria.
+     * Se è ottimizzata, mostra un avviso e rimanda l'utente alle impostazioni di Android.
+     */
+    private fun checkAndRequestBatteryOptimizations() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        
+        // Verifica se l'app è già stata inserita nella lista "Non ottimizzare" / "Nessuna restrizione"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val isIgnoring = powerManager.isIgnoringBatteryOptimizations(packageName)
+            
+            if (!isIgnoring) {
+                AlertDialog.Builder(this)
+                    .setTitle("Consumo in Background")
+                    .setMessage("Per ricevere gli avvisi della lavatrice in tempo reale ed evitare ritardi a schermo spento, è necessario impostare la batteria dell'app su 'Nessuna restrizione'.")
+                    .setPositiveButton("Imposta Ora") { _, _ ->
+                        try {
+                            // Apre direttamente la schermata di sistema per escludere l'app dalle ottimizzazioni
+                            val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            // Se il produttore dello smartphone blocca l'azione diretta, apre la lista generale
+                            try {
+                                val intent = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
                     }
-
-                startActivity(intent)
-
-            } catch (_: Exception) {
-                // Some manufacturers (certain Samsung/Xiaomi builds)
-                // block this system intent: in that case, battery
-                // saving for the app must be disabled manually from
-                // the phone's own settings.
+                    .setNegativeButton("Più Tardi", null)
+                    .setCancelable(false)
+                    .show()
             }
         }
     }
