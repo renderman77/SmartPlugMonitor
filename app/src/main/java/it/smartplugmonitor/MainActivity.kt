@@ -9,11 +9,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.widget.Button
-import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -52,7 +50,7 @@ class MainActivity : AppCompatActivity() {
 
         btnToggle.setOnClickListener {
             if (MonitorService.isServiceRunning) {
-                val intent = Intent(this, MonitorService::class.class.java)
+                val intent = Intent(this, MonitorService::class.java)
                 stopService(intent)
             } else {
                 val intent = Intent(this, MonitorService::class.java)
@@ -69,7 +67,6 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        // Chiede la disattivazione del risparmio energetico all'avvio dell'app
         checkAndRequestBatteryOptimizations()
     }
 
@@ -83,14 +80,9 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(updateRunnable)
     }
 
-    /**
-     * Controlla se l'applicazione è soggetta alle restrizioni della batteria.
-     * Se è ottimizzata, mostra un avviso e rimanda l'utente alle impostazioni di Android.
-     */
     private fun checkAndRequestBatteryOptimizations() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         
-        // Verifica se l'app è già stata inserita nella lista "Non ottimizzare" / "Nessuna restrizione"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val isIgnoring = powerManager.isIgnoringBatteryOptimizations(packageName)
             
@@ -100,13 +92,11 @@ class MainActivity : AppCompatActivity() {
                     .setMessage("Per ricevere gli avvisi della lavatrice in tempo reale ed evitare ritardi a schermo spento, è necessario impostare la batteria dell'app su 'Nessuna restrizione'.")
                     .setPositiveButton("Imposta Ora") { _, _ ->
                         try {
-                            // Apre direttamente la schermata di sistema per escludere l'app dalle ottimizzazioni
                             val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                                 data = Uri.parse("package:$packageName")
                             }
                             startActivity(intent)
                         } catch (e: Exception) {
-                            // Se il produttore dello smartphone blocca l'azione diretta, apre la lista generale
                             try {
                                 val intent = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                                 startActivity(intent)
