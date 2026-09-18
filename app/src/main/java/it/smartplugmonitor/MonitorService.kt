@@ -120,29 +120,32 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-               client = TuyaClient(ip, localKey)
+        client = TuyaClient(ip, localKey)
 
         var state = "WAITING"
         var belowThresholdSince: Long? = null
-        var startupReadsLeft = 5   // prime letture più "aggressive"
+        
+        // Flag per forzare un aggiornamento attivo subito dopo l'avvio stabile
+        var initialForceRefreshNeeded = true 
 
         while (running) {
             try {
-                val power =
-                    if (startupReadsLeft > 0) {
-                        startupReadsLeft--
-                        client!!.getPower()          // prova refresh + query
-                    } else {
-                        client!!.getPowerPassive()   // regime normale
+                // 1. Lettura passiva sicura per evitare errori di connessione iniziali
+                var power = client!!.getPowerPassive()
+
+                // 2. Se è l'avvio, aspettiamo 2 secondi per stabilizzare la rete e forziamo il refresh reale
+                if (initialForceRefreshNeeded) {
+                    try {
+                        Thread.sleep(2000L) // Pausa di stabilizzazione socket
+                        power = client!!.getPower() // Lettura attiva e immediata dei watt reali
+                        initialForceRefreshNeeded = false // Fatto con successo, non lo ripete più
+                    } catch (_: Exception) {
+                        // Se fallisce il refresh forzato, teniamo il valore passivo senza rompere il ciclo
                     }
+                }
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
-
-                // se arriva già un valore sensato, non serve continuare in modalità avvio
-                if (power > 0.5) {
-                    startupReadsLeft = 0
-                }
 
                 if (power > offThreshold) {
                     state = "RUNNING"
@@ -189,8 +192,8 @@ class MonitorService : Service() {
                 } catch (_: Exception) {
                 }
 
-                // dopo un errore, ritenta ancora in modalità avvio
-                startupReadsLeft = maxOf(startupReadsLeft, 2)
+                // In caso di errore di connessione generalizzato, riabilitiamo il refresh forzato al ripristino
+                initialForceRefreshNeeded = true 
 
                 try {
                     Thread.sleep(ERROR_BACKOFF_MS)
