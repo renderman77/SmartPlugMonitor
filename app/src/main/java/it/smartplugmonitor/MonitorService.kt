@@ -23,7 +23,6 @@ class MonitorService : Service() {
 
     @Volatile private var running = false
     private var workerThread: Thread? = null
-    private var client: TuyaClient? = null
     @Volatile private var cycleFinishedLocked = false
     private var alarmPlayer: MediaPlayer? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -67,9 +66,6 @@ class MonitorService : Service() {
 
         workerThread?.interrupt()
         workerThread = null
-
-        client?.close()
-        client = null
 
         stopAlarmSound()
 
@@ -116,17 +112,16 @@ class MonitorService : Service() {
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
         val pollIntervalMs = 15000L
-
-        client = TuyaClient(ip, localKey)
-
         var state = "WAITING"
         var belowThresholdSince: Long? = null
 
         while (running) {
+            var client: TuyaClient? = null
 
             try {
-
-                val power = client!!.getPower()
+                // Apriamo la connessione da zero ad ogni singolo ciclo per pulire la rete
+                client = TuyaClient(ip, localKey)
+                val power = client.getPower()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
@@ -167,25 +162,24 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
-                
-                // Mettiamo in pausa il codice QUI, dopo aver letto i dati e aggiornato lo schermo!
-                Thread.sleep(pollIntervalMs)
 
             } catch (_: InterruptedException) {
                 break
             } catch (e: Exception) {
+                lastConnectionText = "Connection error, retrying..."
+                updateStatusNotification()
+            } finally {
+                // REGOLA D'ORO: Chiudiamo e distruggiamo SEMPRE il client per liberare la cache della presa
                 try {
                     client?.close()
                 } catch (_: Exception) {}
-                
-                client = TuyaClient(ip, localKey)
-                
-                // Mettiamo in pausa anche in caso di errore prima di riprovare
-                try {
-                    Thread.sleep(pollIntervalMs)
-                } catch (_: InterruptedException) {
-                    break
-                }
+                client = null
+            }
+
+            try {
+                Thread.sleep(pollIntervalMs)
+            } catch (_: InterruptedException) {
+                break
             }
         }
     }
