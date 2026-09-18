@@ -41,7 +41,6 @@ class MonitorService : Service() {
             return START_STICKY
         }
 
-        // Attiva il WifiLock per impedire ad Android di spegnere il Wi-Fi a schermo spento
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
@@ -74,7 +73,6 @@ class MonitorService : Service() {
 
         stopAlarmSound()
 
-        // Rilascia il WifiLock quando l'utente ferma il monitoraggio
         try {
             if (wifiLock?.isHeld == true) {
                 wifiLock?.release()
@@ -123,8 +121,7 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
 
         while (running) {
-            // 4 secondi standard, 1 secondo durante il conteggio di fine ciclo per la massima precisione
-            var sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 1000L else 4000L
+            val sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 1000L else 4000L
 
             try {
 
