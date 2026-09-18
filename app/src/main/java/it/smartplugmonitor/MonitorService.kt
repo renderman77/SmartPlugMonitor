@@ -24,7 +24,6 @@ class MonitorService : Service() {
     private var workerThread: Thread? = null
     private var client: TuyaClient? = null
     @Volatile private var cycleFinishedLocked = false
-    private var wakeLock: PowerManager.WakeLock? = null
     private var alarmPlayer: MediaPlayer? = null
 
     override fun onCreate() {
@@ -39,14 +38,6 @@ class MonitorService : Service() {
         if (workerThread?.isAlive == true) {
             return START_STICKY
         }
-
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-
-        wakeLock =
-            pm.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "SmartPlugMonitor::WakeLock"
-            ).apply { acquire() }
 
         running = true
         isServiceRunning = true
@@ -72,13 +63,7 @@ class MonitorService : Service() {
 
         stopAlarmSound()
 
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
-        }
-
-        // Reset to neutral values: while stopped, the main screen
-        // shouldn't keep showing the last reading from before, grayed
-        // out -- it should look clearly "off".
+        // Reset dei valori quando l'app viene fermata
         lastPowerText = "-- W"
         lastStatusText = "Stopped"
         lastConnectionText = "Not connected"
@@ -113,7 +98,8 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-        val basePollMs = 10_000L
+        // Frequenza fissa a 15 secondi
+        val pollIntervalMs = 15_000L
 
         client = TuyaClient(ip, localKey)
 
@@ -121,8 +107,6 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
 
         while (running) {
-
-            var sleepTime = basePollMs
 
             try {
 
@@ -142,8 +126,6 @@ class MonitorService : Service() {
                 } else {
 
                     if (state == "RUNNING") {
-
-                        sleepTime = 3_000L
 
                         val since = belowThresholdSince
 
@@ -169,18 +151,15 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
-                Thread.sleep(sleepTime)
+                Thread.sleep(pollIntervalMs)
 
             } catch (_: InterruptedException) {
-
                 break
-
             } catch (e: Exception) {
-
                 client?.close()
-
                 try {
-                    Thread.sleep(5_000L)
+                    // Se perde la connessione riprova dopo 15 secondi
+                    Thread.sleep(pollIntervalMs)
                 } catch (_: InterruptedException) {
                     break
                 }
