@@ -27,6 +27,7 @@ class MonitorService : Service() {
     @Volatile private var cycleFinishedLocked = false
     private var alarmPlayer: MediaPlayer? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -41,7 +42,7 @@ class MonitorService : Service() {
             return START_STICKY
         }
 
-        // Impedisce ad Android di addormentare la scheda Wi-Fi a schermo spento
+        // Il WifiLock lo teniamo attivo per garantire stabilità di rete durante tutto il servizio
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
@@ -74,7 +75,9 @@ class MonitorService : Service() {
 
         stopAlarmSound()
 
-        // Rilascia la scheda Wi-Fi tornando ai consumi normali del telefono
+        // Rilasciamo tutti i blocchi hardware avanzati
+        releaseWakeLock()
+
         try {
             if (wifiLock?.isHeld == true) {
                 wifiLock?.release()
@@ -123,9 +126,9 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
 
         while (running) {
-            // Mantiene i 4 secondi stabili per non far addormentare la cache della presa smart,
-            // velocizzando il controllo a 1 secondo solo durante il conteggio finale (debounce)
-            val sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 1000L else 4000L
+            // Se siamo in RUNNING e i watt sono scesi sotto soglia (belowThresholdSince non è nullo),
+            // allora forziamo il controllo stretto ogni 5 secondi, altrimenti monitoraggio normale ogni 15 secondi.
+            val sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 5000L else 15000L
 
             try {
 
@@ -141,6 +144,9 @@ class MonitorService : Service() {
                     cycleFinishedLocked = false
                     lastStatusText = "Running"
                     stopAlarmSound()
+                    
+                    // Se la lavatrice consuma ancora, spegniamo il WakeLock per risparmiare energia
+                    releaseWakeLock()
 
                 } else {
 
@@ -149,6 +155,8 @@ class MonitorService : Service() {
                         val since = belowThresholdSince
 
                         if (since == null) {
+                            // PRIMO CONTROLLO SOTTO SOGLIA: Svegliamo la CPU all'istante con il WakeLock!
+                            acquireWakeLock()
                             belowThresholdSince = System.currentTimeMillis()
                             lastStatusText = "Running"
                         } else if (
@@ -159,6 +167,9 @@ class MonitorService : Service() {
                             cycleFinishedLocked = true
                             lastStatusText = "Cycle finished"
                             startAlarmSound()
+                            
+                            // Il ciclo è finito, possiamo rilasciare la CPU
+                            releaseWakeLock()
                         } else {
                             lastStatusText = "Running"
                         }
@@ -166,6 +177,7 @@ class MonitorService : Service() {
                     } else {
                         lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
                         belowThresholdSince = null
+                        releaseWakeLock()
                     }
                 }
 
@@ -177,12 +189,34 @@ class MonitorService : Service() {
             } catch (e: Exception) {
                 client?.close()
                 try {
-                    Thread.sleep(4000L)
+                    Thread.sleep(sleepTime)
                 } catch (_: InterruptedException) {
                     break
                 }
             }
         }
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SmartPlugMonitor::DynamicWakeLock").apply {
+                    acquire()
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (_: Exception) {
+        }
+        wakeLock = null
     }
 
     private fun startAlarmSound() {
