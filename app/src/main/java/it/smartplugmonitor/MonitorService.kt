@@ -41,7 +41,6 @@ class MonitorService : Service() {
             return START_STICKY
         }
 
-        // Il WifiLock lo teniamo solo per non far disconnettere l'antenna locale
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
@@ -116,7 +115,6 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-        // Frequenza fissa, lineare e super stabile a 15 secondi
         val pollIntervalMs = 15000L
 
         client = TuyaClient(ip, localKey)
@@ -169,6 +167,8 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
+                
+                // Mettiamo in pausa il codice QUI, dopo aver letto i dati e aggiornato lo schermo!
                 Thread.sleep(pollIntervalMs)
 
             } catch (_: InterruptedException) {
@@ -179,6 +179,8 @@ class MonitorService : Service() {
                 } catch (_: Exception) {}
                 
                 client = TuyaClient(ip, localKey)
+                
+                // Mettiamo in pausa anche in caso di errore prima di riprovare
                 try {
                     Thread.sleep(pollIntervalMs)
                 } catch (_: InterruptedException) {
