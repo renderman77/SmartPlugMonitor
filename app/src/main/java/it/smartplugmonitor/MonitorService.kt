@@ -4,6 +4,7 @@ import android.app.*
 import android.content.*
 import android.media.*
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.*
 import androidx.core.app.NotificationCompat
 import java.util.Locale
@@ -25,6 +26,7 @@ class MonitorService : Service() {
     private var client: TuyaClient? = null
     @Volatile private var cycleFinishedLocked = false
     private var alarmPlayer: MediaPlayer? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +39,15 @@ class MonitorService : Service() {
 
         if (workerThread?.isAlive == true) {
             return START_STICKY
+        }
+
+        // Attiva il WifiLock per impedire ad Android di spegnere il Wi-Fi a schermo spento
+        try {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
+                acquire()
+            }
+        } catch (_: Exception) {
         }
 
         running = true
@@ -62,6 +73,15 @@ class MonitorService : Service() {
         client = null
 
         stopAlarmSound()
+
+        // Rilascia il WifiLock quando l'utente ferma il monitoraggio
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+        } catch (_: Exception) {
+        }
+        wifiLock = null
 
         lastPowerText = "-- W"
         lastStatusText = "Stopped"
@@ -103,8 +123,7 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
 
         while (running) {
-            // Tempo di attesa base dinamico: 4 secondi per aggiornamenti rapidi sullo schermo.
-            // Se scendiamo sotto la soglia, scendiamo a 1 secondo per non perdere l'istante esatto del debounce.
+            // 4 secondi standard, 1 secondo durante il conteggio di fine ciclo per la massima precisione
             var sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 1000L else 4000L
 
             try {
@@ -157,7 +176,6 @@ class MonitorService : Service() {
             } catch (e: Exception) {
                 client?.close()
                 try {
-                    // In caso di errore di rete aspetta 4 secondi prima di riprovare
                     Thread.sleep(4000L)
                 } catch (_: InterruptedException) {
                     break
