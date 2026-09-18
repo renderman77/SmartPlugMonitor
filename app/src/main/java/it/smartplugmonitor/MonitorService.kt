@@ -22,7 +22,7 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Intervallo di controllo sicuro e consigliato dai forum per non sovraccaricare la presa */
+        /** Poll fisso: compromesso stabilità presa / reattività */
         private const val POLL_MS = 7_000L
         private const val ERROR_BACKOFF_MS = 10_000L
 
@@ -122,14 +122,22 @@ class MonitorService : Service() {
 
         client = TuyaClient(ip, localKey)
 
+        // ==========================================
+        // UNICA AGGIUNTA RISPETTO AL TUO ORIGINALE:
+        // Una singola lettura attiva immediata SOLO all'avvio per azzerare il ritardo iniziale.
+        // Se fallisce per qualsiasi motivo viene ignorata e non blocca l'applicazione.
+        try {
+            client!!.getPower()
+        } catch (_: Exception) {}
+        // ==========================================
+
         var state = "WAITING"
         var belowThresholdSince: Long? = null
 
         while (running) {
             try {
-                // Utilizza getPower() anziché getPowerPassive() per richiedere i DP specifici 18,19,20.
-                // In questo modo la presa risponde subito a ogni ciclo (stile Python) eliminando i 40s di timeout.
-                val power = client!!.getPower()
+                // LETTURA PASSIVA STANDARD (Ripristinata al 100% come piace alla tua presa)
+                val power = client!!.getPowerPassive()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
