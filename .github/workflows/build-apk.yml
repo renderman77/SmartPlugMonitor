@@ -1,23 +1,44 @@
-name: Genera Keystore Segreto
+name: Build Smart Plug Monitor
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  generate:
+  build:
+    name: Build APK
     runs-on: ubuntu-latest
+
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Genera il file JKS e convertilo in Base64
-        run: |
-          keytool -genkey -v -keystore smartplug-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias smartplug-alias -storepass Miopassword123 -keypass Miopassword123 -dname "CN=SmartPlug, OU=Monitor, O=Home, L=Roma, S=Italia, C=IT"
-          echo "=== COPIA LA RIGA QUI SOTTO ==="
-          base64 -w 0 smartplug-release.jks
-          echo ""
-          echo "=== FINE COPIA ==="
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartPlugMonitor-Signed
+          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
