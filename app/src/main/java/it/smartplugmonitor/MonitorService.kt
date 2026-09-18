@@ -22,7 +22,7 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Poll fisso allineato ai 5-7 secondi del test Python stabile */
+        /** Intervallo di controllo sicuro e consigliato dai forum per non sovraccaricare la presa */
         private const val POLL_MS = 7_000L
         private const val ERROR_BACKOFF_MS = 10_000L
 
@@ -122,21 +122,14 @@ class MonitorService : Service() {
 
         client = TuyaClient(ip, localKey)
 
-        // AGGIORNAMENTO DI STATO INIZIALE (Come faceva Python prima del ciclo)
-        // Serve a riempire la cache ed evitare i 30 secondi di attesa senza rompere i socket successivi
-        try {
-            client!!.getPower() 
-        } catch (_: Exception) {
-            // Se fallisce all'avvio non importa, la cache si allineerà passivamente
-        }
-
         var state = "WAITING"
         var belowThresholdSince: Long? = null
 
         while (running) {
             try {
-                // Durante il ciclo usiamo solo la lettura passiva sicura che non genera disconnessioni
-                val power = client!!.getPowerPassive()
+                // Utilizza getPower() anziché getPowerPassive() per richiedere i DP specifici 18,19,20.
+                // In questo modo la presa risponde subito a ogni ciclo (stile Python) eliminando i 40s di timeout.
+                val power = client!!.getPower()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
@@ -191,12 +184,6 @@ class MonitorService : Service() {
                 } catch (_: InterruptedException) {
                     break
                 }
-                
-                // Dopo un errore di rete forziamo un singolo refresh al riavvio per riallineare i dati
-                try {
-                    client = TuyaClient(ip, localKey)
-                    client!!.getPower()
-                } catch (_: Exception) {}
             }
         }
     }
