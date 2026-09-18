@@ -41,6 +41,7 @@ class MonitorService : Service() {
             return START_STICKY
         }
 
+        // Impedisce ad Android di addormentare la scheda Wi-Fi a schermo spento
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
@@ -73,6 +74,7 @@ class MonitorService : Service() {
 
         stopAlarmSound()
 
+        // Rilascia la scheda Wi-Fi tornando ai consumi normali del telefono
         try {
             if (wifiLock?.isHeld == true) {
                 wifiLock?.release()
@@ -121,6 +123,8 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
 
         while (running) {
+            // Mantiene i 4 secondi stabili per non far addormentare la cache della presa smart,
+            // velocizzando il controllo a 1 secondo solo durante il conteggio finale (debounce)
             val sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 1000L else 4000L
 
             try {
