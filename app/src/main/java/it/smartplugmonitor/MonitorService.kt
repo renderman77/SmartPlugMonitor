@@ -22,7 +22,7 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Poll fisso: compromesso stabilità presa / reattività */
+        /** Poll fisso di 7 secondi sicuro per la presa */
         private const val POLL_MS = 7_000L
         private const val ERROR_BACKOFF_MS = 10_000L
 
@@ -122,22 +122,25 @@ class MonitorService : Service() {
 
         client = TuyaClient(ip, localKey)
 
-        // ==========================================
-        // UNICA AGGIUNTA RISPETTO AL TUO ORIGINALE:
-        // Una singola lettura attiva immediata SOLO all'avvio per azzerare il ritardo iniziale.
-        // Se fallisce per qualsiasi motivo viene ignorata e non blocca l'applicazione.
+        // Una singola lettura attiva all'avvio per forzare l'allineamento iniziale
         try {
             client!!.getPower()
         } catch (_: Exception) {}
-        // ==========================================
 
         var state = "WAITING"
         var belowThresholdSince: Long? = null
 
         while (running) {
             try {
-                // LETTURA PASSIVA STANDARD (Ripristinata al 100% come piace alla tua presa)
-                val power = client!!.getPowerPassive()
+                // LOGICA IBRIDA SELETTIVA:
+                // Se il ventilatore/lavatrice è in funzione (RUNNING), interroghiamo attivamente i registri.
+                // In questo modo, appena lo spegni, l'app legge 0W entro 7 secondi anziché aspettarne 40.
+                // Se è spento (WAITING), usiamo la lettura passiva per non generare errori di connessione.
+                val power = if (state == "RUNNING") {
+                    client!!.getPower()
+                } else {
+                    client!!.getPowerPassive()
+                }
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
