@@ -63,7 +63,6 @@ class MonitorService : Service() {
 
         stopAlarmSound()
 
-        // Reset dei valori quando l'app viene fermata
         lastPowerText = "-- W"
         lastStatusText = "Stopped"
         lastConnectionText = "Not connected"
@@ -98,7 +97,7 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-        // Frequenza fissa a 15 secondi
+        // Frequenza fissa regolare stabilita a 15 secondi
         val pollIntervalMs = 15_000L
 
         client = TuyaClient(ip, localKey)
@@ -158,7 +157,6 @@ class MonitorService : Service() {
             } catch (e: Exception) {
                 client?.close()
                 try {
-                    // Se perde la connessione riprova dopo 15 secondi
                     Thread.sleep(pollIntervalMs)
                 } catch (_: InterruptedException) {
                     break
