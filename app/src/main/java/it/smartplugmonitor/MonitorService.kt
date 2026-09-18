@@ -97,15 +97,15 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-        // Frequenza fissa regolare stabilita a 15 secondi
-        val pollIntervalMs = 15_000L
-
         client = TuyaClient(ip, localKey)
 
         var state = "WAITING"
         var belowThresholdSince: Long? = null
 
         while (running) {
+            // Tempo di attesa base dinamico: 4 secondi per aggiornamenti rapidi sullo schermo.
+            // Se scendiamo sotto la soglia, scendiamo a 1 secondo per non perdere l'istante esatto del debounce.
+            var sleepTime = if (state == "RUNNING" && belowThresholdSince != null) 1000L else 4000L
 
             try {
 
@@ -150,14 +150,15 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
-                Thread.sleep(pollIntervalMs)
+                Thread.sleep(sleepTime)
 
             } catch (_: InterruptedException) {
                 break
             } catch (e: Exception) {
                 client?.close()
                 try {
-                    Thread.sleep(pollIntervalMs)
+                    // In caso di errore di rete aspetta 4 secondi prima di riprovare
+                    Thread.sleep(4000L)
                 } catch (_: InterruptedException) {
                     break
                 }
