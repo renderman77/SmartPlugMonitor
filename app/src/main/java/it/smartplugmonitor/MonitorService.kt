@@ -11,40 +11,28 @@ import java.util.Locale
 class MonitorService : Service() {
 
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v9"
-        private const val CHANNEL_ALERT_ID = "monitor_alert_v9"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v10"
         private const val NOTIFICATION_ID_STATUS = 1
-        private const val NOTIFICATION_ID_ALERT = 2
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
-        @Volatile var lastStatusText = "Waiting to start"
-        @Volatile var lastConnectionText = "Not connected yet"
+        @Volatile var lastStatusText = "Stopped"
+        @Volatile var lastConnectionText = "Not connected"
     }
 
     @Volatile private var running = false
     private var workerThread: Thread? = null
     private var client: TuyaClient? = null
-    @Volatile private var alertActive = false
     @Volatile private var cycleFinishedLocked = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private var alarmPlayer: MediaPlayer? = null
 
     override fun onCreate() {
         super.onCreate()
-        // Bug fix: in the previous version this was never called, so on
-        // a fresh install the notification channels didn't exist yet and
-        // notifications could silently fail to appear.
         createNotificationChannels()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
-        if (intent?.action == "STOP_ALARM_ACTION") {
-            // Also fully stops monitoring, as requested: this is no
-            // longer just a "silence the alarm" button.
-            stopSelf()
-            return START_NOT_STICKY
-        }
 
         startForeground(NOTIFICATION_ID_STATUS, buildStatusNotification("Starting..."))
 
@@ -54,13 +42,6 @@ class MonitorService : Service() {
 
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
 
-        // Fix: the previous version acquired this wake lock for a fixed
-        // 15 minutes, then let it expire automatically -- on a wash
-        // cycle longer than that (very common), the CPU could go back
-        // to sleep mid-cycle while the screen was off, which is the
-        // most likely cause of the "much slower with the screen off"
-        // symptom. Held indefinitely now, tied to the service's own
-        // lifecycle instead of a fixed timer, and released in onDestroy.
         wakeLock =
             pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
@@ -69,6 +50,9 @@ class MonitorService : Service() {
 
         running = true
         isServiceRunning = true
+        cycleFinishedLocked = false
+        lastStatusText = "Waiting"
+        lastPowerText = "-- W"
 
         workerThread = Thread { runMonitorLoop() }.also { it.start() }
 
@@ -86,18 +70,22 @@ class MonitorService : Service() {
         client?.close()
         client = null
 
+        stopAlarmSound()
+
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }
 
+        // Reset to neutral values: while stopped, the main screen
+        // shouldn't keep showing the last reading from before, grayed
+        // out -- it should look clearly "off".
+        lastPowerText = "-- W"
+        lastStatusText = "Stopped"
+        lastConnectionText = "Not connected"
+
         val manager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        // Bug fix: previously only the status notification (1) was
-        // cancelled here, so if you stopped monitoring while the alarm
-        // was actively ringing, the alarm notification (2) kept going.
         manager.cancel(NOTIFICATION_ID_STATUS)
-        manager.cancel(NOTIFICATION_ID_ALERT)
 
         super.onDestroy()
     }
@@ -149,11 +137,7 @@ class MonitorService : Service() {
                     belowThresholdSince = null
                     cycleFinishedLocked = false
                     lastStatusText = "Running"
-
-                    if (alertActive) {
-                        cancelAlertNotification()
-                        alertActive = false
-                    }
+                    stopAlarmSound()
 
                 } else {
 
@@ -169,12 +153,11 @@ class MonitorService : Service() {
                         } else if (
                             System.currentTimeMillis() - since >= debounceSeconds * 1000L
                         ) {
-                            sendCycleFinishedNotification(prefs)
-                            alertActive = true
                             state = "WAITING"
                             belowThresholdSince = null
                             cycleFinishedLocked = true
                             lastStatusText = "Cycle finished"
+                            startAlarmSound()
                         } else {
                             lastStatusText = "Running"
                         }
@@ -205,66 +188,44 @@ class MonitorService : Service() {
         }
     }
 
-    private fun sendCycleFinishedNotification(prefs: SharedPreferences) {
+    private fun startAlarmSound() {
 
-        val title = prefs.getString("alert_title", "Cycle finished") ?: "Cycle finished"
+        if (alarmPlayer != null) return
 
-        val message =
-            prefs.getString("alert_message", "The appliance has finished.")
-                ?: "The appliance has finished."
+        try {
 
-        val stopIntent =
-            Intent(this, MonitorService::class.java).apply {
-                action = "STOP_ALARM_ACTION"
-            }
+            val uri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
 
-        val stopPendingIntent =
-            PendingIntent.getService(
-                this,
-                0,
-                stopIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-
-        val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
-
-        val notification =
-            NotificationCompat.Builder(this, CHANNEL_ALERT_ID)
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setContentIntent(
-                    PendingIntent.getActivity(
-                        this,
-                        0,
-                        Intent(this, MainActivity::class.java),
-                        PendingIntent.FLAG_IMMUTABLE
+            alarmPlayer =
+                MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
                     )
-                )
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setSound(soundUri)
-                .setOngoing(true)
-                .setAutoCancel(false)
-                .addAction(
-                    android.R.drawable.ic_menu_close_clear_cancel,
-                    "STOP",
-                    stopPendingIntent
-                )
-                .build()
+                    setDataSource(this@MonitorService, uri)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
 
-        notification.flags = notification.flags or Notification.FLAG_INSISTENT
-
-        val manager =
-            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        manager.notify(NOTIFICATION_ID_ALERT, notification)
+        } catch (_: Exception) {
+            alarmPlayer = null
+        }
     }
 
-    private fun cancelAlertNotification() {
-        val manager =
-            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.cancel(NOTIFICATION_ID_ALERT)
+    private fun stopAlarmSound() {
+
+        try {
+            alarmPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {
+        }
+
+        alarmPlayer = null
     }
 
     private fun buildStatusNotification(text: String): Notification =
@@ -308,27 +269,6 @@ class MonitorService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 setSound(null, null)
-                enableVibration(false)
-            }
-        )
-
-        val soundUri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
-
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ALERT_ID,
-                "Cycle finished",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                setSound(
-                    soundUri,
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-                setBypassDnd(true)
-                enableLights(false)
                 enableVibration(false)
             }
         )
