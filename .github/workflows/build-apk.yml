@@ -24,8 +24,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build APK
-        run: gradle assembleDebug
+      - name: Build APK Senza Cache
+        run: gradle assembleDebug --no-build-cache --rerun-tasks
 
       - name: Sign APK
         uses: r0adkll/sign-android-release@v1
