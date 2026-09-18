@@ -1,145 +1,277 @@
 package it.smartplugmonitor
 
-import android.Manifest
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.res.ColorStateList
-import android.graphics.Color
+import android.app.*
+import android.content.*
+import android.media.*
 import android.net.Uri
-import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.os.PowerManager
-import android.provider.Settings
-import android.widget.Button
-import android.widget.ImageButton
-import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
+import android.net.wifi.WifiManager
+import android.os.*
+import androidx.core.app.NotificationCompat
+import java.util.Locale
 
-class MainActivity : AppCompatActivity() {
+class MonitorService : Service() {
 
-    private lateinit var statusText: TextView
-    private lateinit var powerText: TextView
-    private lateinit var connectionText: TextView
-    private lateinit var toggleButton: Button
+    companion object {
+        private const val CHANNEL_STATUS_ID = "monitor_status_v10"
+        private const val NOTIFICATION_ID_STATUS = 1
 
-    private val uiHandler = Handler(Looper.getMainLooper())
-
-    private val uiRefreshRunnable = object : Runnable {
-        override fun run() {
-            refreshUiFromService()
-            uiHandler.postDelayed(this, 1000L)
-        }
+        @Volatile var isServiceRunning = false
+        @Volatile var lastPowerText = "-- W"
+        @Volatile var lastStatusText = "Stopped"
+        @Volatile var lastConnectionText = "Not connected"
     }
 
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    @Volatile private var running = false
+    private var workerThread: Thread? = null
+    private var client: TuyaClient? = null
+    @Volatile private var cycleFinishedLocked = false
+    private var alarmPlayer: MediaPlayer? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannels()
+    }
 
-        statusText = findViewById(R.id.statusText)
-        powerText = findViewById(R.id.powerText)
-        connectionText = findViewById(R.id.connectionText)
-        toggleButton = findViewById(R.id.toggleButton)
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 
-        findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+        startForeground(NOTIFICATION_ID_STATUS, buildStatusNotification("Starting..."))
+
+        if (workerThread?.isAlive == true) {
+            return START_STICKY
         }
 
-        toggleButton.setOnClickListener {
-            if (MonitorService.isServiceRunning) {
-                stopMonitorService()
-            } else {
-                requestNotificationPermissionIfNeeded()
-                startMonitorService()
-            }
-            updateToggleButtonLabel()
-        }
-
-        requestNotificationPermissionIfNeeded()
-        maybeAskIgnoreBatteryOptimizations()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        updateToggleButtonLabel()
-        uiHandler.post(uiRefreshRunnable)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        uiHandler.removeCallbacks(uiRefreshRunnable)
-    }
-
-    private fun startMonitorService() {
-        val intent = Intent(this, MonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(this, intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    private fun stopMonitorService() {
-        stopService(Intent(this, MonitorService::class.java))
-    }
-
-    private fun updateToggleButtonLabel() {
-        if (MonitorService.isServiceRunning) {
-            toggleButton.text = "STOP"
-            toggleButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#D32F2F")) // Rosso scuro
-        } else {
-            toggleButton.text = "START"
-            toggleButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#388E3C")) // Verde scuro
-        }
-    }
-
-    private fun refreshUiFromService() {
-        updateToggleButtonLabel()
-        powerText.text = MonitorService.lastPowerText
-        statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
-        connectionText.text = MonitorService.lastConnectionText
-
-        val colorRes = when {
-            !MonitorService.isServiceRunning -> android.R.color.darker_gray
-            MonitorService.lastStatusText.equals("Running", ignoreCase = true) ->
-                android.R.color.holo_green_dark
-            MonitorService.lastConnectionText.contains("error", ignoreCase = true) ||
-                MonitorService.lastConnectionText.contains("not", ignoreCase = true) ->
-                android.R.color.holo_red_dark
-            else -> android.R.color.holo_blue_dark
-        }
-        statusText.setTextColor(ContextCompat.getColor(this, colorRes))
-    }
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                this, Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
-    private fun maybeAskIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        // Il WifiLock lo teniamo solo per non far disconnettere l'antenna locale
         try {
-            startActivity(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-            )
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "SmartPlugMonitor::WifiLock").apply {
+                acquire()
+            }
         } catch (_: Exception) {
         }
+
+        running = true
+        isServiceRunning = true
+        cycleFinishedLocked = false
+        lastStatusText = "Waiting"
+        lastPowerText = "-- W"
+
+        workerThread = Thread { runMonitorLoop() }.also { it.start() }
+
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+
+        running = false
+        isServiceRunning = false
+
+        workerThread?.interrupt()
+        workerThread = null
+
+        client?.close()
+        client = null
+
+        stopAlarmSound()
+
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+        } catch (_: Exception) {
+        }
+        wifiLock = null
+
+        lastPowerText = "-- W"
+        lastStatusText = "Stopped"
+        lastConnectionText = "Not connected"
+
+        val manager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(NOTIFICATION_ID_STATUS)
+
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun runMonitorLoop() {
+
+        val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+        val ip = prefs.getString("ip_address", "") ?: ""
+        val localKey = prefs.getString("local_key", "") ?: ""
+
+        if (ip.isEmpty() || localKey.isEmpty()) {
+            lastStatusText = "Not configured"
+            lastConnectionText = "Set up the plug in Settings"
+            updateStatusNotification()
+            stopSelf()
+            return
+        }
+
+        val offThreshold =
+            (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
+
+        val debounceSeconds =
+            (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
+
+        // Frequenza fissa, lineare e super stabile a 15 secondi
+        val pollIntervalMs = 15000L
+
+        client = TuyaClient(ip, localKey)
+
+        var state = "WAITING"
+        var belowThresholdSince: Long? = null
+
+        while (running) {
+
+            try {
+
+                val power = client!!.getPower()
+
+                lastPowerText = String.format(Locale.US, "%.1f W", power)
+                lastConnectionText = "Plug connected"
+
+                if (power > offThreshold) {
+
+                    state = "RUNNING"
+                    belowThresholdSince = null
+                    cycleFinishedLocked = false
+                    lastStatusText = "Running"
+                    stopAlarmSound()
+
+                } else {
+
+                    if (state == "RUNNING") {
+
+                        val since = belowThresholdSince
+
+                        if (since == null) {
+                            belowThresholdSince = System.currentTimeMillis()
+                            lastStatusText = "Running"
+                        } else if (
+                            System.currentTimeMillis() - since >= debounceSeconds * 1000L
+                        ) {
+                            state = "WAITING"
+                            belowThresholdSince = null
+                            cycleFinishedLocked = true
+                            lastStatusText = "Cycle finished"
+                            startAlarmSound()
+                        } else {
+                            lastStatusText = "Running"
+                        }
+
+                    } else {
+                        lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
+                        belowThresholdSince = null
+                    }
+                }
+
+                updateStatusNotification()
+                Thread.sleep(pollIntervalMs)
+
+            } catch (_: InterruptedException) {
+                break
+            } catch (e: Exception) {
+                try {
+                    client?.close()
+                } catch (_: Exception) {}
+                
+                client = TuyaClient(ip, localKey)
+                try {
+                    Thread.sleep(pollIntervalMs)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }
+    }
+
+    private fun startAlarmSound() {
+
+        if (alarmPlayer != null) return
+
+        try {
+
+            val uri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
+
+            alarmPlayer =
+                MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    setDataSource(this@MonitorService, uri)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+
+        } catch (_: Exception) {
+            alarmPlayer = null
+        }
+    }
+
+    private fun stopAlarmSound() {
+
+        try {
+            alarmPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {
+        }
+
+        alarmPlayer = null
+    }
+
+    private fun buildStatusNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Smart Plug Monitor")
+            .setContentText(text)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .build()
+
+    private fun updateStatusNotification() {
+        val manager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(
+            NOTIFICATION_ID_STATUS,
+            buildStatusNotification("$lastStatusText — $lastPowerText")
+        )
+    }
+
+    private fun createNotificationChannels() {
+
+        if (Build.VERSION.VERSION_CODES.O == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val manager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_STATUS_ID,
+                "Monitoring status",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                setSound(null, null)
+                enableVibration(false)
+            }
+        )
     }
 }
+
