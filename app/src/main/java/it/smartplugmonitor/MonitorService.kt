@@ -1,18 +1,30 @@
 package it.smartplugmonitor
 
-import android.app.*
-import android.content.*
-import android.media.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.net.Uri
-import android.os.*
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import java.util.Locale
 
 class MonitorService : Service() {
 
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v10"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
+
+        /** Poll fisso: compromesso stabilità presa / reattività */
+        private const val POLL_MS = 7_000L
+        private const val ERROR_BACKOFF_MS = 10_000L
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
@@ -24,6 +36,7 @@ class MonitorService : Service() {
     private var workerThread: Thread? = null
     private var client: TuyaClient? = null
     @Volatile private var cycleFinishedLocked = false
+    private var wakeLock: PowerManager.WakeLock? = null
     private var alarmPlayer: MediaPlayer? = null
 
     override fun onCreate() {
@@ -32,8 +45,19 @@ class MonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID_STATUS, buildStatusNotification("Starting..."))
+
         if (workerThread?.isAlive == true) {
             return START_STICKY
+        }
+
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "SmartPlugMonitor::WakeLock"
+        ).apply {
+            setReferenceCounted(false)
+            acquire()
         }
 
         running = true
@@ -41,11 +65,9 @@ class MonitorService : Service() {
         cycleFinishedLocked = false
         lastStatusText = "Waiting"
         lastPowerText = "-- W"
-
-        startForeground(NOTIFICATION_ID_STATUS, buildStatusNotification("Starting..."))
+        lastConnectionText = "Connecting..."
 
         workerThread = Thread { runMonitorLoop() }.also { it.start() }
-
         return START_STICKY
     }
 
@@ -61,12 +83,17 @@ class MonitorService : Service() {
 
         stopAlarmSound()
 
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Exception) {
+        }
+        wakeLock = null
+
         lastPowerText = "-- W"
         lastStatusText = "Stopped"
         lastConnectionText = "Not connected"
 
-        val manager =
-            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(NOTIFICATION_ID_STATUS)
 
         super.onDestroy()
@@ -76,12 +103,13 @@ class MonitorService : Service() {
 
     private fun runMonitorLoop() {
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val ip = prefs.getString("ip_address", "") ?: ""
-        val localKey = prefs.getString("local_key", "") ?: ""
+
+        val ip = prefs.getString("ip_address", "")?.trim().orEmpty()
+        val localKey = prefs.getString("local_key", "")?.trim().orEmpty()
 
         if (ip.isEmpty() || localKey.isEmpty()) {
             lastStatusText = "Not configured"
-            lastConnectionText = "Set up the plug in Settings"
+            lastConnectionText = "Set IP and Local Key in Settings"
             updateStatusNotification()
             stopSelf()
             return
@@ -99,7 +127,8 @@ class MonitorService : Service() {
 
         while (running) {
             try {
-                val power = client!!.getPower()
+                // Lettura standard (DP_QUERY), senza UPDATEDPS forzato
+                val power = client!!.getPowerPassive()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
@@ -107,7 +136,10 @@ class MonitorService : Service() {
                 if (power > offThreshold) {
                     state = "RUNNING"
                     belowThresholdSince = null
-                    cycleFinishedLocked = false
+                    if (cycleFinishedLocked) {
+                        cycleFinishedLocked = false
+                        stopAlarmSound()
+                    }
                     lastStatusText = "Running"
                     stopAlarmSound()
                 } else {
@@ -126,22 +158,30 @@ class MonitorService : Service() {
                             lastStatusText = "Running"
                         }
                     } else {
-                        lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
+                        lastStatusText =
+                            if (cycleFinishedLocked) "Cycle finished" else "Waiting"
                         belowThresholdSince = null
                     }
                 }
 
                 updateStatusNotification()
-                Thread.sleep(4000L)
+                Thread.sleep(POLL_MS)
 
-            } catch (e: InterruptedException) {
+            } catch (_: InterruptedException) {
                 break
             } catch (e: Exception) {
-                lastConnectionText = "Connection error: ${e.localizedMessage}"
+                lastConnectionText = "Connection error — retrying"
+                lastPowerText = "-- W"
                 updateStatusNotification()
+
                 try {
-                    Thread.sleep(4000L)
-                } catch (ie: InterruptedException) {
+                    client?.close()
+                } catch (_: Exception) {
+                }
+
+                try {
+                    Thread.sleep(ERROR_BACKOFF_MS)
+                } catch (_: InterruptedException) {
                     break
                 }
             }
@@ -180,9 +220,9 @@ class MonitorService : Service() {
         alarmPlayer = null
     }
 
-    private fun buildStatusNotification(text: String): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
-            .setSmallIcon(R.drawable.ic_notification)
+    private fun buildStatusNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle("Smart Plug Monitor")
             .setContentText(text)
             .setContentIntent(
@@ -197,17 +237,20 @@ class MonitorService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setSilent(true)
             .build()
-    }
 
     private fun updateStatusNotification() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID_STATUS, buildStatusNotification("$lastStatusText — $lastPowerText"))
+        manager.notify(
+            NOTIFICATION_ID_STATUS,
+            buildStatusNotification("$lastStatusText — $lastPowerText")
+        )
     }
 
     private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channel = NotificationChannel(
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(
                 CHANNEL_STATUS_ID,
                 "Monitoring status",
                 NotificationManager.IMPORTANCE_LOW
@@ -215,7 +258,6 @@ class MonitorService : Service() {
                 setSound(null, null)
                 enableVibration(false)
             }
-            manager.createNotificationChannel(channel)
-        }
+        )
     }
 }
