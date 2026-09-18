@@ -120,25 +120,35 @@ class MonitorService : Service() {
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
 
-        client = TuyaClient(ip, localKey)
+               client = TuyaClient(ip, localKey)
 
         var state = "WAITING"
         var belowThresholdSince: Long? = null
+        var startupReadsLeft = 5   // prime letture più "aggressive"
 
         while (running) {
             try {
-                // Lettura standard (DP_QUERY), senza UPDATEDPS forzato
-                val power = client!!.getPowerPassive()
+                val power =
+                    if (startupReadsLeft > 0) {
+                        startupReadsLeft--
+                        client!!.getPower()          // prova refresh + query
+                    } else {
+                        client!!.getPowerPassive()   // regime normale
+                    }
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
+
+                // se arriva già un valore sensato, non serve continuare in modalità avvio
+                if (power > 0.5) {
+                    startupReadsLeft = 0
+                }
 
                 if (power > offThreshold) {
                     state = "RUNNING"
                     belowThresholdSince = null
                     if (cycleFinishedLocked) {
                         cycleFinishedLocked = false
-                        stopAlarmSound()
                     }
                     lastStatusText = "Running"
                     stopAlarmSound()
@@ -178,6 +188,9 @@ class MonitorService : Service() {
                     client?.close()
                 } catch (_: Exception) {
                 }
+
+                // dopo un errore, ritenta ancora in modalità avvio
+                startupReadsLeft = maxOf(startupReadsLeft, 2)
 
                 try {
                     Thread.sleep(ERROR_BACKOFF_MS)
