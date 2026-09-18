@@ -15,8 +15,6 @@ class SettingsActivity : AppCompatActivity() {
         val localKeyEditText = findViewById<EditText>(R.id.localKeyEditText)
         val thresholdEditText = findViewById<EditText>(R.id.offThresholdEditText)
         val debounceEditText = findViewById<EditText>(R.id.debounceEditText)
-        val alertTitleEditText = findViewById<EditText>(R.id.alertTitleEditText)
-        val alertMessageEditText = findViewById<EditText>(R.id.alertMessageEditText)
         val saveButton = findViewById<Button>(R.id.saveButton)
 
         val preferences = getSharedPreferences("settings", MODE_PRIVATE)
@@ -25,8 +23,6 @@ class SettingsActivity : AppCompatActivity() {
         localKeyEditText.setText(preferences.getString("local_key", ""))
         thresholdEditText.setText(preferences.getString("off_threshold", "10"))
         debounceEditText.setText(preferences.getString("debounce_seconds", "90"))
-        alertTitleEditText.setText(preferences.getString("alert_title", "Cycle finished"))
-        alertMessageEditText.setText(preferences.getString("alert_message", "The appliance has finished."))
 
         saveButton.setOnClickListener {
             preferences.edit()
@@ -34,12 +30,9 @@ class SettingsActivity : AppCompatActivity() {
                 .putString("local_key", localKeyEditText.text.toString().trim())
                 .putString("off_threshold", thresholdEditText.text.toString().trim())
                 .putString("debounce_seconds", debounceEditText.text.toString().trim())
-                .putString("alert_title", alertTitleEditText.text.toString().trim())
-                .putString("alert_message", alertMessageEditText.text.toString().trim())
                 .apply()
 
             finish()
         }
     }
 }
-
