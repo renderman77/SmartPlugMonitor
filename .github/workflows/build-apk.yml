@@ -24,7 +24,12 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build APK Senza Cache
+      - name: Generazione Manifest di Emergenza
+        run: |
+          mkdir -p app/src/main
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://github.com">\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />\n    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n    <application\n        android:allowBackup="true"\n        android:icon="@mipmap/ic_launcher"\n        android:roundIcon="@mipmap/ic_launcher_round"\n        android:label="Smart Plug Monitor"\n        android:supportsRtl="true"\n        android:theme="@style/AppTheme">\n        <activity\n            android:name=".SettingsActivity"\n            android:exported="false" />\n        <activity\n            android:name=".MainActivity"\n            android:exported="true">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n        </activity>\n        <service\n            android:name=".MonitorService"\n            android:exported="false"\n            android:foregroundServiceType="dataSync" />\n    </application>\n</manifest>\n' > app/src/main/AndroidManifest.xml
+
+      - name: Build APK Pulito
         run: gradle assembleDebug --no-build-cache --rerun-tasks
 
       - name: Sign APK
