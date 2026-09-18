@@ -32,9 +32,6 @@ class MonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
-        startForeground(NOTIFICATION_ID_STATUS, buildStatusNotification("Starting..."))
-
         if (workerThread?.isAlive == true) {
             return START_STICKY
         }
@@ -45,13 +42,14 @@ class MonitorService : Service() {
         lastStatusText = "Waiting"
         lastPowerText = "-- W"
 
+        startForeground(NOTIFICATION_ID_STATUS, buildStatusNotification("Starting..."))
+
         workerThread = Thread { runMonitorLoop() }.also { it.start() }
 
         return START_STICKY
     }
 
     override fun onDestroy() {
-
         running = false
         isServiceRunning = false
 
@@ -77,9 +75,7 @@ class MonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun runMonitorLoop() {
-
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-
         val ip = prefs.getString("ip_address", "") ?: ""
         val localKey = prefs.getString("local_key", "") ?: ""
 
@@ -93,12 +89,8 @@ class MonitorService : Service() {
 
         val offThreshold =
             (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
-
         val debounceSeconds =
             (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
-
-        // Intervallo fisso standard e pulito (15 secondi)
-        val pollIntervalMs = 15000L
 
         client = TuyaClient(ip, localKey)
 
@@ -106,34 +98,25 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
 
         while (running) {
-
             try {
-
                 val power = client!!.getPower()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
 
                 if (power > offThreshold) {
-
                     state = "RUNNING"
                     belowThresholdSince = null
                     cycleFinishedLocked = false
                     lastStatusText = "Running"
                     stopAlarmSound()
-
                 } else {
-
                     if (state == "RUNNING") {
-
                         val since = belowThresholdSince
-
                         if (since == null) {
                             belowThresholdSince = System.currentTimeMillis()
                             lastStatusText = "Running"
-                        } else if (
-                            System.currentTimeMillis() - since >= debounceSeconds * 1000L
-                        ) {
+                        } else if (System.currentTimeMillis() - since >= debounceSeconds * 1000L) {
                             state = "WAITING"
                             belowThresholdSince = null
                             cycleFinishedLocked = true
@@ -142,7 +125,6 @@ class MonitorService : Service() {
                         } else {
                             lastStatusText = "Running"
                         }
-
                     } else {
                         lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
                         belowThresholdSince = null
@@ -150,15 +132,16 @@ class MonitorService : Service() {
                 }
 
                 updateStatusNotification()
-                Thread.sleep(pollIntervalMs)
+                Thread.sleep(4000L)
 
-            } catch (_: InterruptedException) {
+            } catch (e: InterruptedException) {
                 break
             } catch (e: Exception) {
-                client?.close()
+                lastConnectionText = "Connection error: ${e.localizedMessage}"
+                updateStatusNotification()
                 try {
-                    Thread.sleep(pollIntervalMs)
-                } catch (_: InterruptedException) {
+                    Thread.sleep(4000L)
+                } catch (ie: InterruptedException) {
                     break
                 }
             }
@@ -166,34 +149,27 @@ class MonitorService : Service() {
     }
 
     private fun startAlarmSound() {
-
         if (alarmPlayer != null) return
-
         try {
-
             val uri = Uri.parse("android.resource://$packageName/raw/alarm_beep")
-
-            alarmPlayer =
-                MediaPlayer().apply {
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                    setDataSource(this@MonitorService, uri)
-                    isLooping = true
-                    prepare()
-                    start()
-                }
-
+            alarmPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(this@MonitorService, uri)
+                isLooping = true
+                prepare()
+                start()
+            }
         } catch (_: Exception) {
             alarmPlayer = null
         }
     }
 
     private fun stopAlarmSound() {
-
         try {
             alarmPlayer?.let {
                 if (it.isPlaying) it.stop()
@@ -201,12 +177,11 @@ class MonitorService : Service() {
             }
         } catch (_: Exception) {
         }
-
         alarmPlayer = null
     }
 
-    private fun buildStatusNotification(text: String): Notification =
-        NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
+    private fun buildStatusNotification(text: String): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Smart Plug Monitor")
             .setContentText(text)
@@ -222,25 +197,17 @@ class MonitorService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setSilent(true)
             .build()
+    }
 
     private fun updateStatusNotification() {
-        val manager =
-            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(
-            NOTIFICATION_ID_STATUS,
-            buildStatusNotification("$lastStatusText — $lastPowerText")
-        )
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID_STATUS, buildStatusNotification("$lastStatusText — $lastPowerText"))
     }
 
     private fun createNotificationChannels() {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
-        val manager =
-            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        manager.createNotificationChannel(
-            NotificationChannel(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = NotificationChannel(
                 CHANNEL_STATUS_ID,
                 "Monitoring status",
                 NotificationManager.IMPORTANCE_LOW
@@ -248,6 +215,7 @@ class MonitorService : Service() {
                 setSound(null, null)
                 enableVibration(false)
             }
-        )
+            manager.createNotificationChannel(channel)
+        }
     }
 }
