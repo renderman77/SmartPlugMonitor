@@ -81,6 +81,32 @@
             android:singleLine="true"
             android:layout_marginBottom="28dp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Alert notification text"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/alertTitleEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Title (e.g. Cycle finished)"
+            android:inputType="text"
+            android:singleLine="true"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/alertMessageEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Message"
+            android:inputType="textMultiLine"
+            android:minLines="2"
+            android:layout_marginBottom="28dp" />
+
         <Button
             android:id="@+id/saveButton"
             android:layout_width="match_parent"
