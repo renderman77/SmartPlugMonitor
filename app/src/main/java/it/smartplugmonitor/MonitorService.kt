@@ -22,7 +22,7 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Poll fisso: compromesso stabilità presa / reattività */
+        /** Poll fisso allineato ai 5-7 secondi del test Python stabile */
         private const val POLL_MS = 7_000L
         private const val ERROR_BACKOFF_MS = 10_000L
 
@@ -122,27 +122,21 @@ class MonitorService : Service() {
 
         client = TuyaClient(ip, localKey)
 
+        // AGGIORNAMENTO DI STATO INIZIALE (Come faceva Python prima del ciclo)
+        // Serve a riempire la cache ed evitare i 30 secondi di attesa senza rompere i socket successivi
+        try {
+            client!!.getPower() 
+        } catch (_: Exception) {
+            // Se fallisce all'avvio non importa, la cache si allineerà passivamente
+        }
+
         var state = "WAITING"
         var belowThresholdSince: Long? = null
-        
-        // Flag per forzare un aggiornamento attivo subito dopo l'avvio stabile
-        var initialForceRefreshNeeded = true 
 
         while (running) {
             try {
-                // 1. Lettura passiva sicura per evitare errori di connessione iniziali
-                var power = client!!.getPowerPassive()
-
-                // 2. Se è l'avvio, aspettiamo 2 secondi per stabilizzare la rete e forziamo il refresh reale
-                if (initialForceRefreshNeeded) {
-                    try {
-                        Thread.sleep(2000L) // Pausa di stabilizzazione socket
-                        power = client!!.getPower() // Lettura attiva e immediata dei watt reali
-                        initialForceRefreshNeeded = false // Fatto con successo, non lo ripete più
-                    } catch (_: Exception) {
-                        // Se fallisce il refresh forzato, teniamo il valore passivo senza rompere il ciclo
-                    }
-                }
+                // Durante il ciclo usiamo solo la lettura passiva sicura che non genera disconnessioni
+                val power = client!!.getPowerPassive()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
@@ -192,14 +186,17 @@ class MonitorService : Service() {
                 } catch (_: Exception) {
                 }
 
-                // In caso di errore di connessione generalizzato, riabilitiamo il refresh forzato al ripristino
-                initialForceRefreshNeeded = true 
-
                 try {
                     Thread.sleep(ERROR_BACKOFF_MS)
                 } catch (_: InterruptedException) {
                     break
                 }
+                
+                // Dopo un errore di rete forziamo un singolo refresh al riavvio per riallineare i dati
+                try {
+                    client = TuyaClient(ip, localKey)
+                    client!!.getPower()
+                } catch (_: Exception) {}
             }
         }
     }
