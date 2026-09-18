@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Impostazioni"
+            android:text="Settings"
             android:textSize="26sp"
             android:textStyle="bold"
             android:layout_marginBottom="28dp" />
@@ -21,7 +21,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Presa"
+            android:text="Plug"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginBottom="12dp" />
@@ -30,15 +30,7 @@
             android:id="@+id/ipEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Indirizzo IP locale"
-            android:inputType="text"
-            android:singleLine="true" />
-
-        <EditText
-            android:id="@+id/deviceIdEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Device ID"
+            android:hint="Local IP address"
             android:inputType="text"
             android:singleLine="true" />
 
@@ -53,7 +45,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Rilevamento"
+            android:text="Detection"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginTop="32dp"
@@ -62,7 +54,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Soglia fine ciclo (W)"
+            android:text="Power Threshold (W)"
             android:textSize="16sp" />
 
         <EditText
@@ -77,7 +69,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Conferma fine ciclo (s)"
+            android:text="Duration (s)"
             android:textSize="16sp" />
 
         <EditText
@@ -87,89 +79,13 @@
             android:hint="90"
             android:inputType="number"
             android:singleLine="true"
-            android:layout_marginBottom="16dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Intervallo lettura (s)"
-            android:textSize="16sp" />
-
-        <EditText
-            android:id="@+id/pollIntervalEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="5"
-            android:inputType="number"
-            android:singleLine="true"
             android:layout_marginBottom="28dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Testo notifica fine ciclo"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="12dp" />
-
-        <EditText
-            android:id="@+id/alertTitleEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Titolo (es. Ciclo terminato)"
-            android:inputType="text"
-            android:singleLine="true"
-            android:layout_marginBottom="8dp" />
-
-        <EditText
-            android:id="@+id/alertMessageEditText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Messaggio"
-            android:inputType="textMultiLine"
-            android:minLines="2"
-            android:layout_marginBottom="28dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Stile notifica"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="12dp" />
-
-        <RadioGroup
-            android:id="@+id/notificationStyleGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginBottom="28dp">
-
-            <RadioButton
-                android:id="@+id/styleAllarme"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Allarme (suono + vibrazione + LED)" />
-
-            <RadioButton
-                android:id="@+id/styleNormale"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Normale (suono di sistema)" />
-
-            <RadioButton
-                android:id="@+id/styleVibrazione"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Solo vibrazione" />
-        </RadioGroup>
 
         <Button
             android:id="@+id/saveButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SALVA" />
+            android:text="SAVE" />
 
     </LinearLayout>
 </ScrollView>
