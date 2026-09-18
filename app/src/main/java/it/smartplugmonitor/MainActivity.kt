@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -89,8 +91,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateToggleButtonLabel() {
-        toggleButton.text =
-            if (MonitorService.isServiceRunning) "Stop Monitor" else "Start Monitor"
+        if (MonitorService.isServiceRunning) {
+            toggleButton.text = "STOP"
+            toggleButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#D32F2F")) // Rosso scuro
+        } else {
+            toggleButton.text = "START"
+            toggleButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#388E3C")) // Verde scuro
+        }
     }
 
     private fun refreshUiFromService() {
