@@ -22,10 +22,11 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Stesso identico ritmo dello script Python sul PC, che si è
-         *  dimostrato reattivo: 5 secondi, una sola lettura semplice. */
-        private const val POLL_MS = 5_000L
-        private const val ERROR_BACKOFF_MS = 5_000L
+        /** 10 secondi: nella fascia raccomandata da TinyTuya per prese
+         *  con monitoraggio energia (5-10s), più prudente su sessioni
+         *  lunghe (3-4 ore) rispetto ai 5s validati solo su test brevi. */
+        private const val POLL_MS = 10_000L
+        private const val ERROR_BACKOFF_MS = 10_000L
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
@@ -229,7 +230,7 @@ class MonitorService : Service() {
 
     private fun buildStatusNotification(text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Smart Plug Monitor")
             .setContentText(text)
             .setContentIntent(
