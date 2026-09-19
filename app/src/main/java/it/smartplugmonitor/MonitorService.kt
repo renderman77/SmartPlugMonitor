@@ -158,8 +158,31 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
         var lastExchange = System.currentTimeMillis()
 
+        // Dopo un errore/riconnessione serve un nuovo "schiaffo": senza,
+        // con un carico stabile che non cambia mai, potremmo restare
+        // "connessi" ma ciechi a lungo, in attesa di uno spontaneo che
+        // non arriva perché non c'è nulla da segnalare.
+        var needsFreshKick = false
+
         while (running) {
             try {
+
+                if (needsFreshKick) {
+                    val fresh = client!!.requestFreshPower() ?: client!!.getPower()
+                    lastPowerText = String.format(Locale.US, "%.1f W", fresh)
+                    lastConnectionText = "Plug connected"
+                    if (fresh > offThreshold) {
+                        state = "RUNNING"
+                        belowThresholdSince = null
+                        lastStatusText = "Running"
+                        stopAlarmSound()
+                    } else if (state != "RUNNING") {
+                        lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
+                    }
+                    lastExchange = System.currentTimeMillis()
+                    needsFreshKick = false
+                    updateStatusNotification()
+                }
 
                 // Nessuna richiesta di dati: restiamo in ascolto. Se la
                 // presa manda qualcosa di sua iniziativa entro la
@@ -231,6 +254,12 @@ class MonitorService : Service() {
                     client?.close()
                 } catch (_: Exception) {
                 }
+
+                // Al prossimo giro, prima di tornare in ascolto passivo,
+                // richiediamo subito un valore fresco invece di aspettare
+                // un eventuale spontaneo che potrebbe non arrivare mai
+                // se il carico è stabile.
+                needsFreshKick = true
 
                 try {
                     Thread.sleep(ERROR_BACKOFF_MS)
