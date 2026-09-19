@@ -1,34 +1,41 @@
 # SmartPlugMonitor
 
-A very simple Android app I made in my spare time with the help of AI. I'm not a programmer.
+SmartPlugMonitor is a simple Android application developed as a hobby project with the help of AI. It monitors the real-time power consumption of a Tuya-compatible smart plug over the local network and detects when a connected appliance or device has finished its cycle.
 
-It monitors the power consumption of a Tuya-compatible smart plug over the local network and can detect when a washing machine has finished its cycle.
+The app communicates directly with the plug on your local network (LAN) and does not require the Tuya cloud, ensuring better privacy and local responsiveness.
 
-## Requirements
+# Requirements
 
-- Android 7.1+
-- Compatible Tuya smart plug
-- Local IP address and `Local Key`
+* Android 7.1+
+* Compatible Tuya smart plug
+* Local IP address and Local Key
 
-The app communicates directly with the plug on the local network and does not require the Tuya cloud.
+# Local Key
 
-## Local Key
+A Local Key is required for local communication. You can use tools like TinyTuya to retrieve it from your Tuya account.
 
-[TinyTuya](https://github.com/jasonacox/tinytuya) can be used to obtain the `Local Key`.
+# Device Detection Logic
 
-## Tested device
+The app determines when a device has finished its operation based on two configurable parameters:
 
-**SURFOU Smart WiFi Plug, 16A — Amazon B0BNJ4XJBP**
+* Power Threshold (W): The wattage limit below which the countdown starts.
+* Duration (s): The countdown timer. The cycle is considered finished only if the power stays continuously below the Power Threshold for this amount of time.
 
-Other Tuya-compatible plugs may work, but are untested.
+# Examples of Configuration
 
-## Download
+* Washing Machine: Set the Power Threshold according to its idle usage. To avoid false alarms caused by temporary pauses between washing and spinning cycles, set the Duration parameter slightly longer than the machine's longest known pause.
+* Makita Double Charger: When the batteries are fully charged, the power drop is sudden and stable. You can set the Power Threshold to 10W and the Duration to a short interval (e.g., 10 seconds), as chargers do not have mid-cycle pauses like washing machines.
 
-Download the APK from [Releases](../../releases).
+# Tested Device
 
-## Disclaimer
+* SURFOU Smart WiFi Plug, 16A (Amazon B0BNJ4XJBP)
 
-This is an independent, unofficial project and is not affiliated with Tuya or SURFOU. 
-I'm not a programmer and this is a hobby project. 
+Other Tuya-compatible plugs may work but are untested.
 
-**Please don't expect ongoing development, bug fixes or feature requests to be addressed.**
+# Download
+
+Download the APK from the Releases section of this repository.
+
+# Disclaimer
+
+This is an independent, unofficial project and is not affiliated with Tuya or SURFOU. The author is not a professional programmer and this is a hobby project. Please do not expect ongoing development, bug fixes, or feature requests to be addressed.
