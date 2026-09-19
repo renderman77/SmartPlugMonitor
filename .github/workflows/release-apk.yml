@@ -25,9 +25,9 @@ jobs:
 
       - name: Decode signing key
         env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         run: |
-          echo "$SIGNING_KEY" | base64 --decode > signing-key.jks
+         printf '%s' "$SIGNING_KEY" | tr -d '\r\n ' | base64 -d > signing-key.jks
 
       - name: Build Release APK
         env:
