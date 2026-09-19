@@ -27,13 +27,7 @@ The app determines when a device has finished its operation based on two configu
 
 ### Tested Device
 
-* SURFOU Smart WiFi Plug, 16A (Amazon B0BNJ4XJBP)
-
-Other Tuya-compatible plugs may work but are untested.
-
-### Download
-
-Download the APK from the Releases section of this repository.
+* SURFOU Smart WiFi Plug, 16A (Amazon B0BNJ4XJBP) Other Tuya-compatible plugs may work but are untested.
 
 ### Disclaimer
 
