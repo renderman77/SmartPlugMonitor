@@ -28,6 +28,5 @@ Download the APK from [Releases](../../releases).
 
 ## Disclaimer
 
-This is an independent, unofficial project and is not affiliated with Tuya or SURFOU.
-
-I'm not a programmer and this is a hobby project. **Please don't expect ongoing development, bug fixes or feature requests to be addressed.**
+This is an independent, unofficial project and is not affiliated with Tuya or SURFOU. I'm not a programmer and this is a hobby project. 
+**Please don't expect ongoing development, bug fixes or feature requests to be addressed.**
