@@ -22,9 +22,10 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Poll fisso di 7 secondi sicuro per la presa */
-        private const val POLL_MS = 7_000L
-        private const val ERROR_BACKOFF_MS = 10_000L
+        /** Stesso identico ritmo dello script Python sul PC, che si è
+         *  dimostrato reattivo: 5 secondi, una sola lettura semplice. */
+        private const val POLL_MS = 5_000L
+        private const val ERROR_BACKOFF_MS = 5_000L
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
@@ -118,7 +119,7 @@ class MonitorService : Service() {
         val offThreshold =
             (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
         val debounceSeconds =
-            (prefs.getString("debounce_seconds", "60") ?: "60").toLongOrNull() ?: 60L
+            (prefs.getString("debounce_seconds", "10") ?: "10").toLongOrNull() ?: 10L
 
         client = TuyaClient(ip, localKey)
 
@@ -132,15 +133,10 @@ class MonitorService : Service() {
 
         while (running) {
             try {
-                // LOGICA IBRIDA SELETTIVA:
-                // Se il ventilatore/lavatrice è in funzione (RUNNING), interroghiamo attivamente i registri.
-                // In questo modo, appena lo spegni, l'app legge 0W entro 7 secondi anziché aspettarne 40.
-                // Se è spento (WAITING), usiamo la lettura passiva per non generare errori di connessione.
-                val power = if (state == "RUNNING") {
-                    client!!.getPower()
-                } else {
-                    client!!.getPowerPassive()
-                }
+                // Lettura unica e semplice, sempre uguale — come lo
+                // script Python: niente comandi "attivi" separati,
+                // niente rami diversi tra RUNNING e WAITING.
+                val power = client!!.getPower()
 
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"

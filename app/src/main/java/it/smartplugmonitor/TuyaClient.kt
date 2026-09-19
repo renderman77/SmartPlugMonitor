@@ -23,18 +23,6 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
 
     @Synchronized fun getPower(): Double {
         ensureConnected()
-        val dpIds = org.json.JSONArray().put(18).put(19).put(20)
-        val payload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
-        val targetKey = sessionKey ?: throw Exception("Session not available")
-        try {
-            sendMessage(0x12, payload, targetKey)
-            return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
-        } catch (_: Exception) {}
-        return getPowerPassive()
-    }
-
-    @Synchronized fun getPowerPassive(): Double {
-        ensureConnected()
         val payload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
         val targetKey = sessionKey ?: throw Exception("Session not available")
         sendMessage(0x10, payload, targetKey)
