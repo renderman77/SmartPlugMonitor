@@ -76,7 +76,7 @@
             android:id="@+id/debounceEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="90"
+            android:hint="10"
             android:inputType="number"
             android:singleLine="true"
             android:layout_marginBottom="28dp" />
