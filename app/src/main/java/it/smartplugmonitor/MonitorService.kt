@@ -146,7 +146,12 @@ class MonitorService : Service() {
         try {
             val fresh = client!!.requestFreshPower() ?: client!!.getPower()
             lastPowerText = String.format(Locale.US, "%.1f W", fresh)
-            if (fresh > offThreshold) state = "RUNNING"
+            if (fresh > offThreshold) {
+                state = "RUNNING"
+                lastStatusText = "Running"
+            } else {
+                lastStatusText = "Waiting"
+            }
         } catch (_: Exception) {
         }
 
