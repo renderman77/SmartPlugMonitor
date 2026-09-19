@@ -84,10 +84,17 @@ class MonitorService : Service() {
         running = false
         isServiceRunning = false
 
-        workerThread?.interrupt()
-        workerThread = null
-
+        // Importante l'ordine: chiudere il socket PRIMA sblocca subito
+        // il thread se è fermo in lettura (interrupt() da solo non lo
+        // farebbe, si sbloccherebbe solo al timeout, fino a 8 secondi).
         client?.close()
+
+        workerThread?.interrupt()
+        try {
+            workerThread?.join(3000)
+        } catch (_: InterruptedException) {
+        }
+        workerThread = null
         client = null
 
         stopAlarmSound()
@@ -154,6 +161,12 @@ class MonitorService : Service() {
                 // finestra, lo vediamo; altrimenti "power" è null e va
                 // bene così, non è un errore.
                 val power = client!!.listenForUpdate(LISTEN_TIMEOUT_MS)
+
+                // Se nel frattempo è arrivato lo STOP (onDestroy ha già
+                // chiuso il socket per sbloccarci), usciamo subito senza
+                // toccare più heartbeat o notifica.
+                if (!running) break
+
                 lastConnectionText = "Plug connected"
 
                 if (power != null) {

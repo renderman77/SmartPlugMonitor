@@ -82,10 +82,13 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
         } catch (_: SocketTimeoutException) {
             // Nessun dato in questa finestra: normale, non è un errore.
             null
-        } catch (e: Exception) {
-            // Un messaggio è arrivato ma non conteneva la potenza (es.
-            // un semplice ACK): normale, non è un errore di connessione.
-            if (e.message == "No DPS" || e.message == "No Power DP") null else throw e
+        } catch (_: Exception) {
+            // Un messaggio è arrivato ma non era un aggiornamento di
+            // potenza utilizzabile (es. un ACK, o un formato diverso):
+            // normale, non forziamo una riconnessione per questo. Una
+            // connessione davvero morta verrà comunque rilevata al
+            // prossimo heartbeat, che non è protetto da questo catch.
+            null
         }
     }
 
