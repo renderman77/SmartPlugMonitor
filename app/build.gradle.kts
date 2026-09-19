@@ -14,34 +14,14 @@ android {
         versionName = "1.0"
     }
 
-signingConfigs {
-    create("release") {
-        val keystoreFile = System.getenv("SIGNING_KEY_FILE")
-        val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
-        val keyAlias = System.getenv("KEY_ALIAS")
-        val keyPassword = System.getenv("KEY_PASSWORD")
-
-        if (keystoreFile != null && keystorePassword != null &&
-            keyAlias != null && keyPassword != null) {
-
-            storeFile = file(keystoreFile)
-            storePassword = keystorePassword
-            this.keyAlias = keyAlias
-            this.keyPassword = keyPassword
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+        }
+        release {
+            isMinifyEnabled = false
         }
     }
-}
-
-buildTypes {
-    debug {
-        isMinifyEnabled = false
-    }
-
-    release {
-        isMinifyEnabled = false
-        signingConfig = signingConfigs.getByName("release")
-    }
-}
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
