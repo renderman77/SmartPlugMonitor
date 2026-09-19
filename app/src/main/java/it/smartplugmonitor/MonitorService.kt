@@ -22,10 +22,17 @@ class MonitorService : Service() {
         private const val CHANNEL_STATUS_ID = "monitor_status_v11"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** 10 secondi: nella fascia raccomandata da TinyTuya per prese
-         *  con monitoraggio energia (5-10s), più prudente su sessioni
-         *  lunghe (3-4 ore) rispetto ai 5s validati solo su test brevi. */
-        private const val POLL_MS = 10_000L
+        /** Intervallo confermato sicuro da un test reale (misurato su
+         *  prese dello stesso tipo, protocollo 3.4): senza battito la
+         *  connessione cade dopo ~30s di inattività. Lo mandiamo ogni
+         *  20s dall'ULTIMO scambio reale (non a orario fisso), così se
+         *  arriva già qualcosa di spontaneo non serve mandarne uno in più. */
+        private const val HEARTBEAT_INTERVAL_MS = 20_000L
+
+        /** Quanto restare in ascolto passivo prima di ridare il
+         *  controllo al ciclo (per poter comunque controllare il
+         *  debounce e il timer dell'heartbeat). */
+        private const val LISTEN_TIMEOUT_MS = 8_000
         private const val ERROR_BACKOFF_MS = 10_000L
 
         @Volatile var isServiceRunning = false
@@ -124,56 +131,76 @@ class MonitorService : Service() {
 
         client = TuyaClient(ip, localKey)
 
-        // Una singola lettura attiva all'avvio per forzare l'allineamento iniziale
-        try {
-            client!!.getPower()
-        } catch (_: Exception) {}
-
+        // Schiaffo iniziale (una tantum): chiediamo un aggiornamento
+        // forzato per sapere subito lo stato di partenza, invece di
+        // aspettare che la presa mandi qualcosa di sua iniziativa.
+        // Se non contiene la potenza, ripieghiamo su una lettura normale.
         var state = "WAITING"
+        try {
+            val fresh = client!!.requestFreshPower() ?: client!!.getPower()
+            lastPowerText = String.format(Locale.US, "%.1f W", fresh)
+            if (fresh > offThreshold) state = "RUNNING"
+        } catch (_: Exception) {
+        }
+
         var belowThresholdSince: Long? = null
+        var lastExchange = System.currentTimeMillis()
 
         while (running) {
             try {
-                // Lettura unica e semplice, sempre uguale — come lo
-                // script Python: niente comandi "attivi" separati,
-                // niente rami diversi tra RUNNING e WAITING.
-                val power = client!!.getPower()
 
-                lastPowerText = String.format(Locale.US, "%.1f W", power)
+                // Nessuna richiesta di dati: restiamo in ascolto. Se la
+                // presa manda qualcosa di sua iniziativa entro la
+                // finestra, lo vediamo; altrimenti "power" è null e va
+                // bene così, non è un errore.
+                val power = client!!.listenForUpdate(LISTEN_TIMEOUT_MS)
                 lastConnectionText = "Plug connected"
 
-                if (power > offThreshold) {
-                    state = "RUNNING"
-                    belowThresholdSince = null
-                    if (cycleFinishedLocked) {
-                        cycleFinishedLocked = false
-                    }
-                    lastStatusText = "Running"
-                    stopAlarmSound()
-                } else {
-                    if (state == "RUNNING") {
-                        val since = belowThresholdSince
-                        if (since == null) {
-                            belowThresholdSince = System.currentTimeMillis()
-                            lastStatusText = "Running"
-                        } else if (System.currentTimeMillis() - since >= debounceSeconds * 1000L) {
-                            state = "WAITING"
-                            belowThresholdSince = null
-                            cycleFinishedLocked = true
-                            lastStatusText = "Cycle finished"
-                            startAlarmSound()
-                        } else {
-                            lastStatusText = "Running"
-                        }
-                    } else {
-                        lastStatusText =
-                            if (cycleFinishedLocked) "Cycle finished" else "Waiting"
+                if (power != null) {
+                    // Un vero scambio è appena avvenuto: il prossimo
+                    // heartbeat può aspettare, non serve mandarne uno
+                    // in più adesso.
+                    lastExchange = System.currentTimeMillis()
+
+                    lastPowerText = String.format(Locale.US, "%.1f W", power)
+
+                    if (power > offThreshold) {
+                        state = "RUNNING"
                         belowThresholdSince = null
+                        cycleFinishedLocked = false
+                        lastStatusText = "Running"
+                        stopAlarmSound()
+                    } else if (state == "RUNNING" && belowThresholdSince == null) {
+                        belowThresholdSince = System.currentTimeMillis()
+                        lastStatusText = "Running"
                     }
                 }
 
+                // Il controllo del debounce va rifatto a ogni ciclo,
+                // anche quando non arriva nessun dato nuovo: è il tempo
+                // trascorso che conta, non l'ultimo messaggio ricevuto.
+                val since = belowThresholdSince
+                if (state == "RUNNING" && since != null &&
+                    System.currentTimeMillis() - since >= debounceSeconds * 1000L
+                ) {
+                    state = "WAITING"
+                    belowThresholdSince = null
+                    cycleFinishedLocked = true
+                    lastStatusText = "Cycle finished"
+                    startAlarmSound()
+                } else if (state == "WAITING" && power == null) {
+                    lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
+                }
+
+                // Battito di mantenimento SOLO se non c'è stato nessuno
+                // scambio reale (spontaneo o battito precedente) negli
+                // ultimi 20 secondi.
+                if (System.currentTimeMillis() - lastExchange >= HEARTBEAT_INTERVAL_MS) {
+                    client!!.sendHeartbeat()
+                    lastExchange = System.currentTimeMillis()
+                }
+
                 updateStatusNotification()
-                Thread.sleep(POLL_MS)
 
             } catch (_: InterruptedException) {
                 break
