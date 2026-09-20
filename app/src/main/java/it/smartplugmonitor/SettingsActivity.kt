@@ -43,7 +43,7 @@ class SettingsActivity : AppCompatActivity() {
 
         addProfileButton.setOnClickListener {
             if (profiles.size >= MAX_PROFILES) {
-                Toast.makeText(this, "Max $MAX_PROFILES profiles", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "Max $MAX_PROFILES profiles", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             val newProfile = AppProfile(
@@ -68,11 +68,11 @@ class SettingsActivity : AppCompatActivity() {
             val updated = collectProfilesFromRows()
 
             if (updated.isEmpty()) {
-                Toast.makeText(this, "Keep at least one profile", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "Keep at least one profile", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             if (updated.any { it.name.isBlank() }) {
-                Toast.makeText(this, "Every profile needs a name", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "Every profile needs a name", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
@@ -110,7 +110,7 @@ class SettingsActivity : AppCompatActivity() {
 
         row.findViewById<Button>(R.id.profileDeleteButton).setOnClickListener {
             if (profiles.size <= 1) {
-                Toast.makeText(this, "Keep at least one profile", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, "Keep at least one profile", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             val index = profilesContainer.indexOfChild(row)
