@@ -21,75 +21,21 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
     private var sessionKey: ByteArray? = null
     private var sequence = 1
 
+    /**
+     * Unica lettura, sempre attiva: richiede esplicitamente lo stato e
+     * aspetta la risposta diretta. Nessun ascolto passivo, nessun
+     * heartbeat separato — ogni chiamata è di per sé uno scambio reale
+     * che tiene viva la connessione. Scelta deliberata dopo aver
+     * verificato che l'ascolto passivo può perdere aggiornamenti con
+     * oscillazioni rapide e ripetute (confermato anche nella
+     * documentazione ufficiale di TinyTuya).
+     */
     @Synchronized fun getPower(): Double {
         ensureConnected()
         val payload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
         val targetKey = sessionKey ?: throw Exception("Session not available")
         sendMessage(0x10, payload, targetKey)
         return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
-    }
-
-    /**
-     * "Schiaffo" iniziale: manda il comando UPDATEDPS (0x12) chiedendo
-     * esplicitamente i DP energetici, usato SOLO una volta all'avvio
-     * per ottenere subito un valore aggiornato senza aspettare il primo
-     * aggiornamento spontaneo della presa. Non va ripetuto a ogni
-     * ciclo: nei test empirici, i cambi di carico bruschi arrivano
-     * comunque da soli come messaggi spontanei.
-     * Ritorna null (invece di lanciare un'eccezione) se la risposta non
-     * contiene il dato di potenza — in quel caso il chiamante può
-     * ripiegare su getPower().
-     */
-    @Synchronized fun requestFreshPower(): Double? {
-        ensureConnected()
-        val targetKey = sessionKey ?: throw Exception("Session not available")
-        val dpIds = org.json.JSONArray().put(18).put(19).put(20)
-        val payload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
-        sendMessage(0x12, payload, targetKey)
-        return try {
-            parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Manda solo un "battito" di mantenimento (nessuna richiesta di
-     * dati) per tenere viva la connessione, e scarta la risposta.
-     */
-    @Synchronized fun sendHeartbeat() {
-        ensureConnected()
-        val targetKey = sessionKey ?: throw Exception("Session not available")
-        sendMessage(0x09, "{}".toByteArray(Charsets.UTF_8), targetKey)
-        try { readMessage() } catch (_: Exception) {}
-    }
-
-    /**
-     * NON manda nessuna richiesta: resta in ascolto sul socket per al
-     * massimo [timeoutMs] millisecondi, e ritorna il valore di potenza
-     * SOLO se la presa ha spontaneamente mandato un aggiornamento in
-     * quella finestra. Ritorna null se non arriva nulla (timeout) o se
-     * arriva un messaggio senza il dato di potenza (es. un ACK) — in
-     * entrambi i casi NON è un errore, è normale non ricevere nulla per
-     * molti cicli quando il consumo non cambia.
-     */
-    @Synchronized fun listenForUpdate(timeoutMs: Int): Double? {
-        ensureConnected()
-        val targetKey = sessionKey ?: throw Exception("Session not available")
-        socket?.soTimeout = timeoutMs
-        return try {
-            parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
-        } catch (_: SocketTimeoutException) {
-            // Nessun dato in questa finestra: normale, non è un errore.
-            null
-        } catch (_: Exception) {
-            // Un messaggio è arrivato ma non era un aggiornamento di
-            // potenza utilizzabile (es. un ACK, o un formato diverso):
-            // normale, non forziamo una riconnessione per questo. Una
-            // connessione davvero morta verrà comunque rilevata al
-            // prossimo heartbeat, che non è protetto da questo catch.
-            null
-        }
     }
 
     private fun ensureConnected() {

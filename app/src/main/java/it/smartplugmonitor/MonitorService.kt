@@ -19,26 +19,16 @@ import java.util.Locale
 class MonitorService : Service() {
 
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v11"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v12"
         private const val NOTIFICATION_ID_STATUS = 1
 
-        /** Intervallo confermato sicuro da un test reale (misurato su
-         *  prese dello stesso tipo, protocollo 3.4): senza battito la
-         *  connessione cade dopo ~30s di inattività. Lo teniamo con
-         *  margine ampio (12s, non 20s) perché il controllo avviene
-         *  solo dopo che listenForUpdate si sblocca — con un timeout
-         *  di ascolto più corto (vedi sotto) il ritardo strutturale
-         *  aggiuntivo resta piccolo, ma vogliamo comunque un margine
-         *  di sicurezza robusto rispetto alla soglia di caduta. */
-        private const val HEARTBEAT_INTERVAL_MS = 12_000L
-
-        /** Ridotto da 8s a 2s: il ciclo si sblocca più spesso per
-         *  ricontrollare i timer (debounce, heartbeat), 
-         *  senza mandare nessuna richiesta in più alla presa —
-         *  resta ascolto puramente passivo, cambia solo quanto spesso
-         *  ridiamo un'occhiata all'orologio. */
-        private const val LISTEN_TIMEOUT_MS = 2_000
-        private const val ERROR_BACKOFF_MS = 3_000L
+        /** Intervallo di lettura attiva: nella fascia 5-10s indicata
+         *  come sicura dalla documentazione di TinyTuya per prese con
+         *  monitoraggio energia. Ogni lettura è una richiesta reale:
+         *  nessun heartbeat separato necessario, la connessione resta
+         *  viva da sola. */
+        private const val POLL_MS = 7_000L
+        private const val ERROR_BACKOFF_MS = 5_000L
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
@@ -52,6 +42,7 @@ class MonitorService : Service() {
     @Volatile private var cycleFinishedLocked = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var alarmPlayer: MediaPlayer? = null
+    private var currentProfileName: String = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -89,9 +80,6 @@ class MonitorService : Service() {
         running = false
         isServiceRunning = false
 
-        // Importante l'ordine: chiudere il socket PRIMA sblocca subito
-        // il thread se è fermo in lettura (interrupt() da solo non lo
-        // farebbe, si sbloccherebbe solo al timeout, fino a 8 secondi).
         client?.close()
 
         workerThread?.interrupt()
@@ -122,8 +110,6 @@ class MonitorService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private var currentProfileName: String = ""
-
     private fun runMonitorLoop() {
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -145,112 +131,44 @@ class MonitorService : Service() {
 
         client = TuyaClient(ip, localKey)
 
-        // Schiaffo iniziale (una tantum): chiediamo un aggiornamento
-        // forzato per sapere subito lo stato di partenza, invece di
-        // aspettare che la presa mandi qualcosa di sua iniziativa.
-        // Se non contiene la potenza, ripieghiamo su una lettura normale.
         var state = "WAITING"
-        try {
-            val fresh = client!!.requestFreshPower() ?: client!!.getPower()
-            lastPowerText = String.format(Locale.US, "%.1f W", fresh)
-            if (fresh > offThreshold) {
-                state = "RUNNING"
-                lastStatusText = "Running"
-            } else {
-                lastStatusText = "Waiting"
-            }
-        } catch (_: Exception) {
-        }
-
         var belowThresholdSince: Long? = null
-        var lastExchange = System.currentTimeMillis()
-
-        // Dopo un errore/riconnessione serve un nuovo "schiaffo": senza,
-        // con un carico stabile che non cambia mai, potremmo restare
-        // "connessi" ma ciechi a lungo, in attesa di uno spontaneo che
-        // non arriva perché non c'è nulla da segnalare.
-        var needsFreshKick = false
 
         while (running) {
             try {
 
-                if (needsFreshKick) {
-                    val fresh = client!!.requestFreshPower() ?: client!!.getPower()
-                    lastPowerText = String.format(Locale.US, "%.1f W", fresh)
-                    lastConnectionText = "Plug connected"
-                    if (fresh > offThreshold) {
-                        recordRecoveryIfNeeded(belowThresholdSince, activeProfile)
-                        state = "RUNNING"
-                        belowThresholdSince = null
-                        lastStatusText = "Running"
-                        stopAlarmSound()
-                    } else if (state != "RUNNING") {
-                        lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
-                    }
-                    lastExchange = System.currentTimeMillis()
-                    needsFreshKick = false
-                    updateStatusNotification()
-                }
+                val power = client!!.getPower()
 
-                // Nessuna richiesta di dati: restiamo in ascolto. Se la
-                // presa manda qualcosa di sua iniziativa entro la
-                // finestra, lo vediamo; altrimenti "power" è null e va
-                // bene così, non è un errore.
-                val power = client!!.listenForUpdate(LISTEN_TIMEOUT_MS)
-
-                // Se nel frattempo è arrivato lo STOP (onDestroy ha già
-                // chiuso il socket per sbloccarci), usciamo subito senza
-                // toccare più heartbeat o notifica.
-                if (!running) break
-
+                lastPowerText = String.format(Locale.US, "%.1f W", power)
                 lastConnectionText = "Plug connected"
 
-                if (power != null) {
-                    // Un vero scambio è appena avvenuto: il prossimo
-                    // heartbeat può aspettare, non serve mandarne uno
-                    // in più adesso.
-                    lastExchange = System.currentTimeMillis()
-
-                    lastPowerText = String.format(Locale.US, "%.1f W", power)
-
-                    if (power > offThreshold) {
-                        recordRecoveryIfNeeded(belowThresholdSince, activeProfile)
-                        state = "RUNNING"
-                        belowThresholdSince = null
-                        cycleFinishedLocked = false
-                        lastStatusText = "Running"
-                        stopAlarmSound()
-                    } else if (state == "RUNNING" && belowThresholdSince == null) {
+                if (power > offThreshold) {
+                    recordRecoveryIfNeeded(belowThresholdSince, activeProfile)
+                    state = "RUNNING"
+                    belowThresholdSince = null
+                    cycleFinishedLocked = false
+                    lastStatusText = "Running"
+                    stopAlarmSound()
+                } else if (state == "RUNNING") {
+                    val since = belowThresholdSince
+                    if (since == null) {
                         belowThresholdSince = System.currentTimeMillis()
                         lastStatusText = "Running"
+                    } else if (System.currentTimeMillis() - since >= debounceSeconds * 1000L) {
+                        state = "WAITING"
+                        belowThresholdSince = null
+                        cycleFinishedLocked = true
+                        lastStatusText = "Cycle finished"
+                        startAlarmSound()
+                    } else {
+                        lastStatusText = "Running"
                     }
-                }
-
-                // Il controllo del debounce va rifatto a ogni ciclo,
-                // anche quando non arriva nessun dato nuovo: è il tempo
-                // trascorso che conta, non l'ultimo messaggio ricevuto.
-                val since = belowThresholdSince
-                if (state == "RUNNING" && since != null &&
-                    System.currentTimeMillis() - since >= debounceSeconds * 1000L
-                ) {
-                    state = "WAITING"
-                    belowThresholdSince = null
-                    cycleFinishedLocked = true
-                    lastStatusText = "Cycle finished"
-                    startAlarmSound()
-                } else if (state == "WAITING" && power == null) {
+                } else {
                     lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
                 }
 
-                // Battito di mantenimento SOLO se non c'è stato nessuno
-                // scambio reale (spontaneo o battito precedente) negli
-                // ultimi 20 secondi.
-                if (System.currentTimeMillis() - lastExchange >= HEARTBEAT_INTERVAL_MS) {
-                    client!!.sendHeartbeat()
-                    lastExchange = System.currentTimeMillis()
-                }
-
                 updateStatusNotification()
+                Thread.sleep(POLL_MS)
 
             } catch (_: InterruptedException) {
                 break
@@ -263,12 +181,6 @@ class MonitorService : Service() {
                     client?.close()
                 } catch (_: Exception) {
                 }
-
-                // Al prossimo giro, prima di tornare in ascolto passivo,
-                // richiediamo subito un valore fresco invece di aspettare
-                // un eventuale spontaneo che potrebbe non arrivare mai
-                // se il carico è stabile.
-                needsFreshKick = true
 
                 try {
                     Thread.sleep(ERROR_BACKOFF_MS)
