@@ -22,19 +22,34 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
     private var sequence = 1
 
     /**
-     * Unica lettura, sempre attiva: richiede esplicitamente lo stato e
-     * aspetta la risposta diretta. Nessun ascolto passivo, nessun
-     * heartbeat separato — ogni chiamata è di per sé uno scambio reale
-     * che tiene viva la connessione. Scelta deliberata dopo aver
-     * verificato che l'ascolto passivo può perdere aggiornamenti con
-     * oscillazioni rapide e ripetute (confermato anche nella
-     * documentazione ufficiale di TinyTuya).
+     * Unica lettura, sempre attiva: nessun ascolto passivo. Usa il
+     * comando UPDATEDPS (0x12) invece del semplice DP_QUERY (0x10):
+     * nei test misurati con cronometro preciso, questo comando ha
+     * dato risposte molto più rapide (7-10s) sia in accensione sia in
+     * spegnimento, contro i 30-40s del DP_QUERY normale anche
+     * interrogato molto più spesso. Se la risposta diretta non
+     * contiene la potenza, ripieghiamo su un DP_QUERY normale nello
+     * stesso ciclo (comunque una richiesta attiva, non un'attesa
+     * passiva) per garantire sempre un valore.
      */
     @Synchronized fun getPower(): Double {
         ensureConnected()
-        val payload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
         val targetKey = sessionKey ?: throw Exception("Session not available")
-        sendMessage(0x10, payload, targetKey)
+
+        val dpIds = org.json.JSONArray().put(18).put(19).put(20)
+        val updateDpsPayload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
+        sendMessage(0x12, updateDpsPayload, targetKey)
+
+        val fromUpdateDps = try {
+            parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+        } catch (_: Exception) {
+            null
+        }
+
+        if (fromUpdateDps != null) return fromUpdateDps
+
+        val queryPayload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
+        sendMessage(0x10, queryPayload, targetKey)
         return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
     }
 
