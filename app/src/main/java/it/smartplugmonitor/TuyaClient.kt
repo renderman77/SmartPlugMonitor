@@ -58,8 +58,12 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
         close()
         if (realKey.size != 16) throw Exception("Local Key must be 16 characters")
         socket = Socket().apply {
-            connect(InetSocketAddress(ipAddress, PORT), 2000)
-            soTimeout = 2000
+            // Margine più ampio rispetto ai 2s originali: l'handshake
+            // iniziale di una connessione nuova ha più passaggi della
+            // semplice lettura di routine, ed è il momento in cui gli
+            // errori di connessione sono comparsi più spesso.
+            connect(InetSocketAddress(ipAddress, PORT), 5000)
+            soTimeout = 5000
         }
         input = DataInputStream(socket!!.getInputStream())
         output = DataOutputStream(socket!!.getOutputStream())
