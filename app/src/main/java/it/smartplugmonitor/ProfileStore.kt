@@ -44,7 +44,7 @@ object ProfileStore {
 
             val default = AppProfile(
                 id = "default",
-                name = "Elettrodomestico 1",
+                name = "Appliance 1",
                 offThreshold = oldThreshold,
                 debounceSeconds = oldDebounce,
                 calibrationEnabled = false,
