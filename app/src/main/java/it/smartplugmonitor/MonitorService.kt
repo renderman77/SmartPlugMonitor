@@ -25,20 +25,20 @@ class MonitorService : Service() {
         /** Intervallo confermato sicuro da un test reale (misurato su
          *  prese dello stesso tipo, protocollo 3.4): senza battito la
          *  connessione cade dopo ~30s di inattività. Lo teniamo con
-         *  margine ampio (12s, non 20s) perché il controllo avviene
+         *  margine ampio (15s, non 20s) perché il controllo avviene
          *  solo dopo che listenForUpdate si sblocca — con un timeout
          *  di ascolto più corto (vedi sotto) il ritardo strutturale
          *  aggiuntivo resta piccolo, ma vogliamo comunque un margine
          *  di sicurezza robusto rispetto alla soglia di caduta. */
-        private const val HEARTBEAT_INTERVAL_MS = 12_000L
+        private const val HEARTBEAT_INTERVAL_MS = 15_000L
 
-        /** Ridotto da 8s a 2s: il ciclo si sblocca più spesso per
-         *  ricontrollare i timer (debounce, heartbeat) quasi in tempo
-         *  reale, senza mandare nessuna richiesta in più alla presa —
+        /** Ridotto da 8s a 5s: il ciclo si sblocca più spesso per
+         *  ricontrollare i timer (debounce, heartbeat), 
+         *  senza mandare nessuna richiesta in più alla presa —
          *  resta ascolto puramente passivo, cambia solo quanto spesso
          *  ridiamo un'occhiata all'orologio. */
-        private const val LISTEN_TIMEOUT_MS = 2_000
-        private const val ERROR_BACKOFF_MS = 1_000L
+        private const val LISTEN_TIMEOUT_MS = 5_000
+        private const val ERROR_BACKOFF_MS = 3_000L
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"

@@ -32,7 +32,7 @@ class MainActivity : AppCompatActivity() {
     private val uiRefreshRunnable = object : Runnable {
         override fun run() {
             refreshUiFromService()
-            uiHandler.postDelayed(this, 1000L)
+            uiHandler.postDelayed(this, 5000L)
         }
     }
 
