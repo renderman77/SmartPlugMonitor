@@ -122,6 +122,8 @@ class MonitorService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var currentProfileName: String = ""
+
     private fun runMonitorLoop() {
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -136,10 +138,10 @@ class MonitorService : Service() {
             return
         }
 
-        val offThreshold =
-            (prefs.getString("off_threshold", "10") ?: "10").toDoubleOrNull() ?: 10.0
-        val debounceSeconds =
-            (prefs.getString("debounce_seconds", "10") ?: "10").toLongOrNull() ?: 10L
+        val activeProfile = ProfileStore.getActiveProfile(this)
+        val offThreshold = activeProfile.offThreshold
+        val debounceSeconds = activeProfile.debounceSeconds
+        currentProfileName = activeProfile.name.ifBlank { "Profile" }
 
         client = TuyaClient(ip, localKey)
 
@@ -177,6 +179,7 @@ class MonitorService : Service() {
                     lastPowerText = String.format(Locale.US, "%.1f W", fresh)
                     lastConnectionText = "Plug connected"
                     if (fresh > offThreshold) {
+                        recordRecoveryIfNeeded(belowThresholdSince, activeProfile)
                         state = "RUNNING"
                         belowThresholdSince = null
                         lastStatusText = "Running"
@@ -211,6 +214,7 @@ class MonitorService : Service() {
                     lastPowerText = String.format(Locale.US, "%.1f W", power)
 
                     if (power > offThreshold) {
+                        recordRecoveryIfNeeded(belowThresholdSince, activeProfile)
                         state = "RUNNING"
                         belowThresholdSince = null
                         cycleFinishedLocked = false
@@ -275,6 +279,30 @@ class MonitorService : Service() {
         }
     }
 
+    /**
+     * Se stavamo contando una pausa (era sotto soglia da un po') e ora
+     * il carico è tornato sopra soglia, la pausa è "recuperata" — cioè
+     * non ha fatto scattare Cycle Finished. Se la calibrazione è
+     * attiva su questo profilo, registriamo la durata se è la più
+     * lunga vista finora, per aiutare a scegliere Duration.
+     */
+    private fun recordRecoveryIfNeeded(belowSince: Long?, profile: AppProfile) {
+        if (belowSince == null || !profile.calibrationEnabled) return
+
+        val pauseSeconds = (System.currentTimeMillis() - belowSince) / 1000
+
+        if (profile.maxPauseSeconds == null || pauseSeconds > profile.maxPauseSeconds!!) {
+            profile.maxPauseSeconds = pauseSeconds
+
+            val allProfiles = ProfileStore.loadProfiles(this)
+            val idx = allProfiles.indexOfFirst { it.id == profile.id }
+            if (idx >= 0) {
+                allProfiles[idx] = profile
+                ProfileStore.saveProfiles(this, allProfiles)
+            }
+        }
+    }
+
     private fun startAlarmSound() {
         if (alarmPlayer != null) return
         try {
@@ -327,9 +355,10 @@ class MonitorService : Service() {
 
     private fun updateStatusNotification() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val prefix = if (currentProfileName.isNotBlank()) "$currentProfileName — " else ""
         manager.notify(
             NOTIFICATION_ID_STATUS,
-            buildStatusNotification("$lastStatusText — $lastPowerText")
+            buildStatusNotification("$prefix$lastStatusText — $lastPowerText")
         )
     }
 

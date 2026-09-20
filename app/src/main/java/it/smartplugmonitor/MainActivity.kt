@@ -15,6 +15,9 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.ArrayAdapter
+import android.widget.Spinner
+import android.widget.AdapterView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +29,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var powerText: TextView
     private lateinit var connectionText: TextView
     private lateinit var toggleButton: Button
+    private lateinit var profileSpinner: Spinner
+
+    private var profilesInSpinner: List<AppProfile> = emptyList()
+    private var suppressSpinnerCallback = false
 
     private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -47,6 +54,17 @@ class MainActivity : AppCompatActivity() {
         powerText = findViewById(R.id.powerText)
         connectionText = findViewById(R.id.connectionText)
         toggleButton = findViewById(R.id.toggleButton)
+        profileSpinner = findViewById(R.id.profileSpinner)
+
+        profileSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (suppressSpinnerCallback) return
+                if (position in profilesInSpinner.indices) {
+                    ProfileStore.setActiveProfileId(this@MainActivity, profilesInSpinner[position].id)
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
 
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -68,8 +86,32 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshProfileSpinner()
         updateToggleButtonLabel()
         uiHandler.post(uiRefreshRunnable)
+    }
+
+    /** Ricarica l'elenco profili (potrebbero essere cambiati nelle
+     *  Impostazioni) e seleziona quello attivo, senza far scattare il
+     *  listener di cambio selezione durante il refresh. Lo spinner
+     *  viene disabilitato mentre il monitoraggio è in corso, per non
+     *  cambiare profilo a metà sessione. */
+    private fun refreshProfileSpinner() {
+        profilesInSpinner = ProfileStore.loadProfiles(this)
+        val names = profilesInSpinner.map { it.name.ifBlank { "(unnamed)" } }
+
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, names)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+
+        suppressSpinnerCallback = true
+        profileSpinner.adapter = adapter
+
+        val activeId = ProfileStore.getActiveProfileId(this)
+        val activeIndex = profilesInSpinner.indexOfFirst { it.id == activeId }
+        if (activeIndex >= 0) profileSpinner.setSelection(activeIndex)
+        suppressSpinnerCallback = false
+
+        profileSpinner.isEnabled = !MonitorService.isServiceRunning
     }
 
     override fun onPause() {
@@ -102,6 +144,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshUiFromService() {
         updateToggleButtonLabel()
+        profileSpinner.isEnabled = !MonitorService.isServiceRunning
         powerText.text = MonitorService.lastPowerText
         statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
         connectionText.text = MonitorService.lastConnectionText
