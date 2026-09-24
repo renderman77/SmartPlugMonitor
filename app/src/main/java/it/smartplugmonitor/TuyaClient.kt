@@ -22,20 +22,52 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
     private var sequence = 1
 
     /**
-     * Lettura semplice e diretta (DP_QUERY, 0x10) — nessun UPDATEDPS.
-     * Era stato introdotto pensando desse letture più fresche/veloci
-     * (misurato con pochi test cronometrati), ma in uso prolungato
-     * reale è coinciso con più errori di connessione e un ritardo di
-     * spegnimento peggiore, non migliore, rispetto a questa versione
-     * più semplice già validata a fondo in precedenza. Si torna a
-     * quello che ha dato i risultati più solidi.
+     * Lettura ATTIVA — usata nella fase "normale" (interrogazione a
+     * intervalli, es. ogni 20s). Comando UPDATEDPS (0x12): con il
+     * traffico verso il cloud Tuya bloccato dal firewall di rete
+     * locale, questo comando si è dimostrato affidabile e preciso nei
+     * test reali (zero errori, rilevamento entro un solo ciclo).
      */
     @Synchronized fun getPower(): Double {
         ensureConnected()
         val targetKey = sessionKey ?: throw Exception("Session not available")
-        val payload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
-        sendMessage(0x10, payload, targetKey)
+        val dpIds = org.json.JSONArray().put(18).put(19).put(20)
+        val payload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
+        sendMessage(0x12, payload, targetKey)
         return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+    }
+
+    /**
+     * Battito di mantenimento (nessuna richiesta di dati) — usato
+     * nella fase "allerta" (ascolto passivo) per tenere viva la
+     * connessione senza interrogare la presa.
+     */
+    @Synchronized fun sendHeartbeat() {
+        ensureConnected()
+        val targetKey = sessionKey ?: throw Exception("Session not available")
+        sendMessage(0x09, "{}".toByteArray(Charsets.UTF_8), targetKey)
+        try { readMessage() } catch (_: Exception) {}
+    }
+
+    /**
+     * NON manda nessuna richiesta — usata nella fase "allerta". Resta
+     * in ascolto sul socket per al massimo [timeoutMs] millisecondi, e
+     * ritorna il valore di potenza SOLO se la presa ha spontaneamente
+     * mandato un aggiornamento in quella finestra. Ritorna null se non
+     * arriva nulla (timeout) o se arriva un messaggio senza il dato di
+     * potenza (es. un ACK) — in entrambi i casi NON è un errore.
+     */
+    @Synchronized fun listenForUpdate(timeoutMs: Int): Double? {
+        ensureConnected()
+        val targetKey = sessionKey ?: throw Exception("Session not available")
+        socket?.soTimeout = timeoutMs
+        return try {
+            parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+        } catch (_: SocketTimeoutException) {
+            null
+        } catch (e: Exception) {
+            if (e.message == "No DPS" || e.message == "No Power DP") null else throw e
+        }
     }
 
     private fun ensureConnected() {

@@ -1,5 +1,6 @@
 package it.smartplugmonitor
 
+import android.app.Activity
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -9,9 +10,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 
-class SettingsActivity : AppCompatActivity() {
+class SettingsActivity : Activity() {
 
     private val MAX_PROFILES = 5
 
@@ -28,6 +28,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val ipEditText = findViewById<EditText>(R.id.ipEditText)
         val localKeyEditText = findViewById<EditText>(R.id.localKeyEditText)
+        val normalIntervalEditText = findViewById<EditText>(R.id.normalIntervalEditText)
         val saveButton = findViewById<Button>(R.id.saveButton)
         profilesContainer = findViewById(R.id.profilesContainer)
         addProfileButton = findViewById(R.id.addProfileButton)
@@ -36,6 +37,9 @@ class SettingsActivity : AppCompatActivity() {
 
         ipEditText.setText(preferences.getString("ip_address", ""))
         localKeyEditText.setText(preferences.getString("local_key", ""))
+        normalIntervalEditText.setText(
+            preferences.getString("normal_interval_seconds", "20")
+        )
 
         profiles.addAll(ProfileStore.loadProfiles(this))
         profiles.forEach { addProfileRow(it) }
@@ -60,9 +64,17 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         saveButton.setOnClickListener {
+
+            val normalInterval = normalIntervalEditText.text.toString().trim().toIntOrNull() ?: 20
+            if (normalInterval < 10) {
+                Toast.makeText(applicationContext, "Minimum 10 seconds recommended", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             preferences.edit()
                 .putString("ip_address", ipEditText.text.toString().trim())
                 .putString("local_key", localKeyEditText.text.toString().trim())
+                .putString("normal_interval_seconds", normalInterval.toString())
                 .apply()
 
             val updated = collectProfilesFromRows()
@@ -102,7 +114,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val maxPauseText = row.findViewById<TextView>(R.id.profileMaxPauseText)
         if (profile.maxPauseSeconds != null) {
-            maxPauseText.text = "Max pause seen: ${profile.maxPauseSeconds}s"
+            maxPauseText.text = "Max pause seen: ${profile.maxPauseSeconds}s (safety margin included)"
             maxPauseText.visibility = View.VISIBLE
         } else {
             maxPauseText.visibility = View.GONE

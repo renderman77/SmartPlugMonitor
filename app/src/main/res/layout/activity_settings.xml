@@ -64,6 +64,30 @@
             android:text="+ Add profile"
             android:layout_marginBottom="28dp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Advanced"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Check interval while waiting (s). Lower values react faster but wake the plug more often — 10s minimum recommended."
+            android:textSize="13sp"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/normalIntervalEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="20"
+            android:inputType="number"
+            android:singleLine="true"
+            android:layout_marginBottom="28dp" />
+
         <Button
             android:id="@+id/saveButton"
             android:layout_width="match_parent"

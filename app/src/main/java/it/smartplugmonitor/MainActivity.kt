@@ -1,10 +1,10 @@
 package it.smartplugmonitor
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -13,17 +13,27 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageButton
-import android.widget.ArrayAdapter
 import android.widget.Spinner
-import android.widget.AdapterView
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
-class MainActivity : AppCompatActivity() {
+/**
+ * Activity Android "pura" (non AppCompatActivity): la nostra UI usa
+ * solo componenti di base (EditText, Button, Spinner, CheckBox,
+ * TextView), quindi non serve la libreria di compatibilità Material —
+ * ed è proprio quella libreria (nello specifico l'inflater che applica
+ * lo stile ai TextView) ad aver causato il crash del Toast su alcuni
+ * telefoni Android 8. Con un'Activity semplice, quella categoria intera
+ * di bug non può più presentarsi.
+ */
+class MainActivity : Activity() {
+
+    private val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
 
     private lateinit var statusText: TextView
     private lateinit var powerText: TextView
@@ -36,15 +46,13 @@ class MainActivity : AppCompatActivity() {
 
     private val uiHandler = Handler(Looper.getMainLooper())
 
-    private val uiRefreshRunnable = object : Runnable {
-        override fun run() {
-            refreshUiFromService()
-            uiHandler.postDelayed(this, 5000L)
+    private val uiRefreshRunnable =
+        object : Runnable {
+            override fun run() {
+                refreshUiFromService()
+                uiHandler.postDelayed(this, 5000L)
+            }
         }
-    }
-
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,9 +74,10 @@ class MainActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
-        findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        findViewById<ImageButton>(R.id.settingsButton)
+            .setOnClickListener {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            }
 
         toggleButton.setOnClickListener {
             if (MonitorService.isServiceRunning) {
@@ -77,7 +86,7 @@ class MainActivity : AppCompatActivity() {
                 requestNotificationPermissionIfNeeded()
                 startMonitorService()
             }
-            updateToggleButtonLabel()
+            updateToggleButton()
         }
 
         requestNotificationPermissionIfNeeded()
@@ -87,15 +96,56 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshProfileSpinner()
-        updateToggleButtonLabel()
+        updateToggleButton()
         uiHandler.post(uiRefreshRunnable)
+
+        // Segnala al servizio (se attivo) che siamo in primo piano:
+        // può passare alla modalità più reattiva per la durata in cui
+        // guardiamo lo schermo.
+        if (MonitorService.isServiceRunning) {
+            sendForegroundSignal(true)
+        }
     }
 
-    /** Ricarica l'elenco profili (potrebbero essere cambiati nelle
-     *  Impostazioni) e seleziona quello attivo, senza far scattare il
-     *  listener di cambio selezione durante il refresh. Lo spinner
-     *  viene disabilitato mentre il monitoraggio è in corso, per non
-     *  cambiare profilo a metà sessione. */
+    override fun onPause() {
+        super.onPause()
+        uiHandler.removeCallbacks(uiRefreshRunnable)
+
+        if (MonitorService.isServiceRunning) {
+            sendForegroundSignal(false)
+        }
+    }
+
+    private fun sendForegroundSignal(foreground: Boolean) {
+        val intent = Intent(this, MonitorService::class.java).apply {
+            action = if (foreground) "APP_FOREGROUND" else "APP_BACKGROUND"
+        }
+        startService(intent)
+    }
+
+    private fun startMonitorService() {
+        val intent = Intent(this, MonitorService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+        // L'app è in primo piano proprio ora: segnaliamolo subito,
+        // l'onStartCommand del servizio gestisce anche questo caso.
+        uiHandler.postDelayed({ sendForegroundSignal(true) }, 300L)
+    }
+
+    private fun stopMonitorService() {
+        stopService(Intent(this, MonitorService::class.java))
+    }
+
+    private fun updateToggleButton() {
+        if (MonitorService.isServiceRunning) {
+            toggleButton.text = "STOP"
+            toggleButton.setBackgroundColor(Color.parseColor("#C62828"))
+        } else {
+            toggleButton.text = "START"
+            toggleButton.setBackgroundColor(Color.parseColor("#2E7D32"))
+        }
+        toggleButton.setTextColor(Color.WHITE)
+    }
+
     private fun refreshProfileSpinner() {
         profilesInSpinner = ProfileStore.loadProfiles(this)
         val names = profilesInSpinner.map { it.name.ifBlank { "(unnamed)" } }
@@ -114,75 +164,63 @@ class MainActivity : AppCompatActivity() {
         profileSpinner.isEnabled = !MonitorService.isServiceRunning
     }
 
-    override fun onPause() {
-        super.onPause()
-        uiHandler.removeCallbacks(uiRefreshRunnable)
-    }
-
-    private fun startMonitorService() {
-        val intent = Intent(this, MonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(this, intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    private fun stopMonitorService() {
-        stopService(Intent(this, MonitorService::class.java))
-    }
-
-    private fun updateToggleButtonLabel() {
-        if (MonitorService.isServiceRunning) {
-            toggleButton.text = "STOP"
-            toggleButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#D32F2F")) // Rosso scuro
-        } else {
-            toggleButton.text = "START"
-            toggleButton.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#388E3C")) // Verde scuro
-        }
-    }
-
     private fun refreshUiFromService() {
-        updateToggleButtonLabel()
+        updateToggleButton()
         profileSpinner.isEnabled = !MonitorService.isServiceRunning
         powerText.text = MonitorService.lastPowerText
         statusText.text = "\u25CF  " + MonitorService.lastStatusText.uppercase()
         connectionText.text = MonitorService.lastConnectionText
 
-        val colorRes = when {
-            !MonitorService.isServiceRunning -> android.R.color.darker_gray
-            MonitorService.lastStatusText.equals("Running", ignoreCase = true) ->
-                android.R.color.holo_green_dark
-            MonitorService.lastConnectionText.contains("error", ignoreCase = true) ||
-                MonitorService.lastConnectionText.contains("not", ignoreCase = true) ->
-                android.R.color.holo_red_dark
-            else -> android.R.color.holo_blue_dark
-        }
-        statusText.setTextColor(ContextCompat.getColor(this, colorRes))
+        val color =
+            when {
+                !MonitorService.isServiceRunning -> android.R.color.darker_gray
+                MonitorService.lastStatusText == "Running" -> android.R.color.holo_green_dark
+                MonitorService.lastStatusText == "Cycle finished" -> android.R.color.holo_orange_dark
+                MonitorService.lastConnectionText.contains("error", ignoreCase = true) -> android.R.color.holo_red_dark
+                else -> android.R.color.holo_blue_dark
+            }
+        statusText.setTextColor(getColor(color))
     }
 
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                this, Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
+            val granted =
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+
             if (!granted) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST_CODE
+                )
             }
         }
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // Se negato, semplicemente non arriveranno notifiche — nessuna
+        // azione necessaria qui.
+    }
+
     private fun maybeAskIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (pm.isIgnoringBatteryOptimizations(packageName)) return
-        try {
-            startActivity(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:$packageName")
                 }
-            )
-        } catch (_: Exception) {
+                startActivity(intent)
+            } catch (_: Exception) {
+                // Alcuni produttori bloccano questo intent di sistema:
+                // in quel caso va disattivato manualmente dalle
+                // impostazioni del telefono.
+            }
         }
     }
 }

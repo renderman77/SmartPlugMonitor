@@ -25,7 +25,7 @@
             android:id="@+id/settingsButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="Settings"
             android:src="@android:drawable/ic_menu_preferences" />
 
