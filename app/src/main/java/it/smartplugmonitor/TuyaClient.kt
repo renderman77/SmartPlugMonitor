@@ -40,20 +40,24 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
     try {
         ensureConnected()
         val targetKey = sessionKey ?: throw Exception("Session not available")
-        val dpIds = org.json.JSONArray().put(18).put(19).put(20)
-        val payload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
+
+        // Prova senza lista di DPS (come nei test Python che andavano meglio)
+        val payload = JSONObject().toString().toByteArray(Charsets.UTF_8)  // vuoto
         sendMessage(0x12, payload, targetKey)
 
-        // Piccola pausa per dare tempo alla presa di aggiornare i DPS di potenza
-        // (equivalente di time.sleep(0.25) in Python)
         Thread.sleep(250)
 
-        return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+        val plain = cleanTuyaPayload(decryptFrame(readMessage(), targetKey))
+        val jsonStr = String(plain, Charsets.UTF_8).trim()
+
+        // Log di debug – lo vedi in Logcat filtrando per "TuyaClient"
+        android.util.Log.d("TuyaClient", "Risposta grezza: $jsonStr")
+
+        return parsePowerFromJson(plain)
     } finally {
         close()
     }
 }
-
     private fun ensureConnected() {
         if (socket?.isConnected == true && socket?.isClosed == false && sessionKey != null) return
         close()
