@@ -29,6 +29,7 @@ class SettingsActivity : Activity() {
         val ipEditText = findViewById<EditText>(R.id.ipEditText)
         val localKeyEditText = findViewById<EditText>(R.id.localKeyEditText)
         val normalIntervalEditText = findViewById<EditText>(R.id.normalIntervalEditText)
+        val alertIntervalEditText = findViewById<EditText>(R.id.alertIntervalEditText)
         val saveButton = findViewById<Button>(R.id.saveButton)
         profilesContainer = findViewById(R.id.profilesContainer)
         addProfileButton = findViewById(R.id.addProfileButton)
@@ -39,6 +40,9 @@ class SettingsActivity : Activity() {
         localKeyEditText.setText(preferences.getString("local_key", ""))
         normalIntervalEditText.setText(
             preferences.getString("normal_interval_seconds", "20")
+        )
+        alertIntervalEditText.setText(
+            preferences.getString("alert_interval_seconds", "5")
         )
 
         profiles.addAll(ProfileStore.loadProfiles(this))
@@ -71,10 +75,17 @@ class SettingsActivity : Activity() {
                 return@setOnClickListener
             }
 
+            val alertInterval = alertIntervalEditText.text.toString().trim().toIntOrNull() ?: 5
+            if (alertInterval < 2) {
+                Toast.makeText(applicationContext, "Minimum 2 seconds recommended", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             preferences.edit()
                 .putString("ip_address", ipEditText.text.toString().trim())
                 .putString("local_key", localKeyEditText.text.toString().trim())
                 .putString("normal_interval_seconds", normalInterval.toString())
+                .putString("alert_interval_seconds", alertInterval.toString())
                 .apply()
 
             val updated = collectProfilesFromRows()

@@ -86,6 +86,22 @@
             android:hint="20"
             android:inputType="number"
             android:singleLine="true"
+            android:layout_marginBottom="20dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Check interval when close to a state change, or while the app is open (s). Lower reacts faster but queries the plug more often — 2s minimum recommended."
+            android:textSize="13sp"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/alertIntervalEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="5"
+            android:inputType="number"
+            android:singleLine="true"
             android:layout_marginBottom="28dp" />
 
         <Button
