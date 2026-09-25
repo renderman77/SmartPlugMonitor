@@ -41,17 +41,13 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
         ensureConnected()
         val targetKey = sessionKey ?: throw Exception("Session not available")
 
-        // Prova senza lista di DPS (come nei test Python che andavano meglio)
-        val payload = JSONObject().toString().toByteArray(Charsets.UTF_8)  // vuoto
-        sendMessage(0x12, payload, targetKey)
-
-        Thread.sleep(250)
+        // Solo DP_QUERY (status), senza UPDATEDPS
+        val payload = "{}".toByteArray(Charsets.UTF_8)
+        sendMessage(0x10, payload, targetKey)   // 0x10 = DP_QUERY
 
         val plain = cleanTuyaPayload(decryptFrame(readMessage(), targetKey))
         val jsonStr = String(plain, Charsets.UTF_8).trim()
-
-        // Log di debug – lo vedi in Logcat filtrando per "TuyaClient"
-        android.util.Log.d("TuyaClient", "Risposta grezza: $jsonStr")
+        android.util.Log.d("TuyaClient", "Risposta status: $jsonStr")
 
         return parsePowerFromJson(plain)
     } finally {
