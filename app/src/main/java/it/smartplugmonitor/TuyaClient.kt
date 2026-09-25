@@ -35,25 +35,19 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
      * allerta (intervallo veloce): la differenza tra le due fasi è
      * solo quanto spesso viene chiamata, non il meccanismo.
      */
-@Synchronized fun getPowerFresh(): Double {
-    close()
-    try {
-        ensureConnected()
-        val targetKey = sessionKey ?: throw Exception("Session not available")
-
-        // Solo DP_QUERY (status), senza UPDATEDPS
-        val payload = "{}".toByteArray(Charsets.UTF_8)
-        sendMessage(0x10, payload, targetKey)   // 0x10 = DP_QUERY
-
-        val plain = cleanTuyaPayload(decryptFrame(readMessage(), targetKey))
-        val jsonStr = String(plain, Charsets.UTF_8).trim()
-        android.util.Log.d("TuyaClient", "Risposta status: $jsonStr")
-
-        return parsePowerFromJson(plain)
-    } finally {
+    @Synchronized fun getPowerFresh(): Double {
         close()
+        try {
+            ensureConnected()
+            val targetKey = sessionKey ?: throw Exception("Session not available")
+            val dpIds = org.json.JSONArray().put(18).put(19).put(20)
+            val payload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
+            sendMessage(0x12, payload, targetKey)
+            return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+        } finally {
+            close()
+        }
     }
-}
     private fun ensureConnected() {
         if (socket?.isConnected == true && socket?.isClosed == false && sessionKey != null) return
         close()
