@@ -67,9 +67,22 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
             Thread.sleep(250)
 
             // 3) DP_QUERY normale — da qui leggiamo davvero la potenza.
-            val queryPayload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
-            sendMessage(0x10, queryPayload, targetKey)
-            return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+            // A volte anche questa risposta non contiene il DP della
+            // potenza (osservato più spesso a carico fermo/0W) — in
+            // quel caso ritentiamo un paio di volte sulla stessa
+            // connessione invece di arrenderci subito.
+            var lastError: Exception? = null
+            repeat(3) { attempt ->
+                try {
+                    val queryPayload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
+                    sendMessage(0x10, queryPayload, targetKey)
+                    return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < 2) Thread.sleep(150)
+                }
+            }
+            throw lastError ?: Exception("No Power DP")
         } finally {
             close()
         }
