@@ -22,29 +22,24 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
     private var sequence = 1
 
     /**
-     * Lettura a connessione "usa e getta": apre una connessione nuova,
-     * fa l'handshake completo, poi due scambi in sequenza — confermato
-     * dai test reali (330 tentativi, zero errori):
+     * Lettura a connessione "usa e getta": apre, fa l'handshake, poi:
      *
-     * 1) UPDATEDPS (0x12): chiede alla presa di aggiornare i registri.
-     *    La SUA risposta diretta NON contiene la potenza in modo
-     *    affidabile (a volte sì, a volte solo altri DP, a volte nulla
-     *    di utile) — si legge solo per svuotare il socket, il valore
-     *    si scarta sempre.
-     * 2) Una pausa fissa di 250ms, per dare tempo alla MCU della presa
-     *    di completare l'aggiornamento richiesto.
-     * 3) DP_QUERY (0x10) normale: QUESTA è la risposta da cui si legge
-     *    davvero la potenza.
+     * 1) Manda UPDATEDPS (0x12) — un impulso che chiede alla presa di
+     *    aggiornare i suoi registri.
+     * 2) Ascolta per una finestra BREVE (300ms) se arriva un messaggio
+     *    spontaneo ("push") con il dato di potenza — nei test reali,
+     *    la presa risponde così nella maggioranza dei casi anche con
+     *    Internet aperto, e quasi sempre con la presa isolata: è il
+     *    percorso più veloce (~200ms) e il più "gentile", perché non
+     *    serve mandare una seconda richiesta esplicita.
+     * 3) Solo se non arriva nulla di utile in quella finestra, manda
+     *    una DP_QUERY (0x10) esplicita come riserva, con fino a 3
+     *    tentativi se anche quella non contiene il dato di potenza
+     *    (osservato più spesso a carico fermo/0W).
      *
-     * Poi si chiude subito — sempre, sia in caso di successo sia di
-     * errore. Una connessione tenuta aperta a lungo rischia di
-     * restituire valori stantii se la presa non ha mai contattato il
-     * cloud Tuya da quando è stata riaccesa — condizione che l'app non
-     * può sapere in anticipo.
-     *
-     * Usata sia in fase normale (intervallo lento) sia in fase di
-     * allerta (intervallo veloce): la differenza tra le due fasi è
-     * solo quanto spesso viene chiamata, non il meccanismo.
+     * Chiude sempre alla fine, successo o errore — una connessione
+     * tenuta aperta a lungo rischia dati stantii se la presa non ha
+     * mai contattato il cloud da quando è stata riaccesa.
      */
     @Synchronized fun getPowerFresh(): Double {
         close()
@@ -52,30 +47,27 @@ class TuyaClient(private val ipAddress: String, private val localKey: String) {
             ensureConnected()
             val targetKey = sessionKey ?: throw Exception("Session not available")
 
-            // 1) UPDATEDPS — risposta letta e scartata di proposito.
+            // 1) UPDATEDPS — l'impulso che innesca l'aggiornamento.
             val dpIds = org.json.JSONArray().put(19)
             val updatePayload = JSONObject().put("dpId", dpIds).toString().toByteArray(Charsets.UTF_8)
             sendMessage(0x12, updatePayload, targetKey)
+
+            // 2) Finestra breve in ascolto di un push spontaneo.
+            socket?.soTimeout = 300
             try {
-                readMessage()
+                return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
             } catch (_: Exception) {
-                // Non importa se questa risposta fallisce o è vuota:
-                // il valore vero arriva dalla richiesta successiva.
+                // Niente di utile arrivato in tempo: passiamo alla riserva.
             }
 
-            // 2) Pausa fissa per la MCU della presa.
-            Thread.sleep(250)
-
-            // 3) DP_QUERY normale — da qui leggiamo davvero la potenza.
-            // A volte anche questa risposta non contiene il DP della
-            // potenza (osservato più spesso a carico fermo/0W) — in
-            // quel caso ritentiamo un paio di volte sulla stessa
-            // connessione invece di arrenderci subito.
+            // 3) Riserva: DP_QUERY esplicita, con qualche tentativo se
+            // anche questa risposta non contiene subito la potenza.
             var lastError: Exception? = null
             repeat(3) { attempt ->
                 try {
                     val queryPayload = JSONObject().put("data", JSONObject().put("dps", JSONObject())).toString().toByteArray(Charsets.UTF_8)
                     sendMessage(0x10, queryPayload, targetKey)
+                    socket?.soTimeout = 3000
                     return parsePowerFromJson(cleanTuyaPayload(decryptFrame(readMessage(), targetKey)))
                 } catch (e: Exception) {
                     lastError = e
