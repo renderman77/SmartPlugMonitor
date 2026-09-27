@@ -17,10 +17,10 @@ import androidx.core.app.NotificationCompat
 import java.util.Locale
 
 /**
- * Due fasi, stesso meccanismo di lettura (connessione "usa e getta":
- * apri, interroga con UPDATEDPS, chiudi — mai una connessione tenuta
- * aperta a lungo, che nei test si è dimostrata rischiare dati stantii)
- * — cambia solo la cadenza:
+ * Connessione "usa e getta" per ogni lettura (apri, interroga con
+ * UPDATEDPS + eventuale riserva, chiudi — mai una connessione tenuta
+ * aperta a lungo, che nei test si è dimostrata rischiare dati stantii),
+ * con due cadenze:
  *
  * - NORMAL: ogni 20 secondi (configurabile), per la maggior parte
  *   delle 3-4 ore di un ciclo.
@@ -28,23 +28,26 @@ import java.util.Locale
  *   sceso sotto soglia (stiamo contando per Cycle Finished) oppure
  *   l'app è in primo piano.
  *
- * In entrambe le fasi il WakeLock è breve: preso solo per la durata
- * della singola richiesta, rilasciato subito dopo — non c'è più
- * bisogno di tenerlo acceso con continuità, perché non teniamo più
- * una connessione aperta ad ascoltare.
+ * Il WakeLock è tenuto con CONTINUITÀ per tutta la durata del
+ * monitoraggio (non solo per la singola richiesta): un test reale ha
+ * mostrato che senza di esso, a schermo spento, il ciclo può smettere
+ * del tutto di risvegliarsi per controllare — anche per diversi
+ * minuti di fila. L'affidabilità del rilevamento viene prima del
+ * risparmio energetico.
  */
 class MonitorService : Service() {
 
     companion object {
-        private const val CHANNEL_STATUS_ID = "monitor_status_v14"
+        private const val CHANNEL_STATUS_ID = "monitor_status_v15"
         private const val NOTIFICATION_ID_STATUS = 1
 
         private const val ERROR_BACKOFF_MS = 5_000L
 
-        /** Tetto di sicurezza per il WakeLock breve: si rilascia
-         *  comunque subito dopo la lettura, questa è solo una rete di
-         *  sicurezza nel caso qualcosa si blocchi. */
-        private const val WAKELOCK_SAFETY_MS = 8_000L
+        /** Quante volte di fila il debounce deve risultare scaduto
+         *  prima di far scattare davvero l'allarme — una singola
+         *  lettura sbagliata (es. durante un errore di rete) non basta
+         *  più da sola a far scattare un falso allarme. */
+        private const val DEBOUNCE_CONFIRMATIONS_REQUIRED = 2
 
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
@@ -91,6 +94,7 @@ class MonitorService : Service() {
             PowerManager.PARTIAL_WAKE_LOCK,
             "SmartPlugMonitor::WakeLock"
         ).apply { setReferenceCounted(false) }
+        wakeLock?.acquire()
 
         running = true
         isServiceRunning = true
@@ -178,16 +182,7 @@ class MonitorService : Service() {
 
                 currentMode = desiredMode()
 
-                var power: Double?
-                try {
-                    wakeLock?.acquire(WAKELOCK_SAFETY_MS)
-                    power = client!!.getPowerFresh()
-                } finally {
-                    try {
-                        if (wakeLock?.isHeld == true) wakeLock?.release()
-                    } catch (_: Exception) {
-                    }
-                }
+                val power = client!!.getPowerFresh()
 
                 lastConnectionText = "Plug connected"
                 lastPowerText = String.format(Locale.US, "%.1f W", power)
@@ -197,6 +192,7 @@ class MonitorService : Service() {
                     recordRecoveryIfNeeded(belowThresholdSince, activeProfile, marginSeconds)
                     state = "RUNNING"
                     belowThresholdSince = null
+                    debounceConfirmations = 0
                     cycleFinishedLocked = false
                     lastStatusText = "Running"
                     stopAlarmSound()
@@ -208,16 +204,24 @@ class MonitorService : Service() {
 
                 // Il controllo del debounce va rifatto a ogni ciclo,
                 // anche senza un cambiamento di potenza: conta il
-                // tempo trascorso.
+                // tempo trascorso. Serve però più di una conferma
+                // consecutiva prima di scattare davvero, per non
+                // fidarsi di una singola lettura sfortunata.
                 val since = belowThresholdSince
                 if (state == "RUNNING" && since != null &&
                     System.currentTimeMillis() - since >= debounceSeconds * 1000L
                 ) {
-                    state = "WAITING"
-                    belowThresholdSince = null
-                    cycleFinishedLocked = true
-                    lastStatusText = "Cycle finished"
-                    startAlarmSound()
+                    debounceConfirmations++
+                    if (debounceConfirmations >= DEBOUNCE_CONFIRMATIONS_REQUIRED) {
+                        state = "WAITING"
+                        belowThresholdSince = null
+                        debounceConfirmations = 0
+                        cycleFinishedLocked = true
+                        lastStatusText = "Cycle finished"
+                        startAlarmSound()
+                    } else {
+                        lastStatusText = "Running"
+                    }
                 } else if (state == "WAITING") {
                     lastStatusText = if (cycleFinishedLocked) "Cycle finished" else "Waiting"
                 }
