@@ -168,6 +168,7 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
         var belowThresholdDetectedInNormalMode = false
         var currentMode = "NORMAL"
+        var debounceConfirmations = 0
 
         fun desiredMode(): String =
             if ((state == "RUNNING" && belowThresholdSince != null) || foregroundRequested) "ALERT" else "NORMAL"
