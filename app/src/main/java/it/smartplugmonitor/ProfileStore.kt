@@ -40,7 +40,7 @@ object ProfileStore {
             // c'erano già (così chi aveva già calibrato soglia/durata
             // non perde nulla).
             val oldThreshold = prefs.getString("off_threshold", "10")?.toDoubleOrNull() ?: 10.0
-            val oldDebounce = prefs.getString("debounce_seconds", "10")?.toLongOrNull() ?: 10L
+            val oldDebounce = prefs.getString("debounce_seconds", "60")?.toLongOrNull() ?: 60L
 
             val default = AppProfile(
                 id = "default",
