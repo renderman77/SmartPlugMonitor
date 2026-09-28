@@ -43,12 +43,6 @@ class MonitorService : Service() {
 
         private const val ERROR_BACKOFF_MS = 5_000L
 
-        /** Quante volte di fila il debounce deve risultare scaduto
-         *  prima di far scattare davvero l'allarme — una singola
-         *  lettura sbagliata (es. durante un errore di rete) non basta
-         *  più da sola a far scattare un falso allarme. */
-        private const val DEBOUNCE_CONFIRMATIONS_REQUIRED = 2
-
         @Volatile var isServiceRunning = false
         @Volatile var lastPowerText = "-- W"
         @Volatile var lastStatusText = "Stopped"
@@ -172,7 +166,6 @@ class MonitorService : Service() {
         var belowThresholdSince: Long? = null
         var belowThresholdDetectedInNormalMode = false
         var currentMode = "NORMAL"
-        var debounceConfirmations = 0
 
         fun desiredMode(): String =
             if ((state == "RUNNING" && belowThresholdSince != null) || foregroundRequested) "ALERT" else "NORMAL"
@@ -192,7 +185,6 @@ class MonitorService : Service() {
                     recordRecoveryIfNeeded(belowThresholdSince, activeProfile, marginSeconds)
                     state = "RUNNING"
                     belowThresholdSince = null
-                    debounceConfirmations = 0
                     cycleFinishedLocked = false
                     lastStatusText = "Running"
                     stopAlarmSound()
@@ -204,18 +196,24 @@ class MonitorService : Service() {
 
                 // Il controllo del debounce va rifatto a ogni ciclo,
                 // anche senza un cambiamento di potenza: conta il
-                // tempo trascorso. Serve però più di una conferma
-                // consecutiva prima di scattare davvero, per non
-                // fidarsi di una singola lettura sfortunata.
+                // tempo trascorso.
+                //
+                // Se la pausa è stata notata in fase NORMAL (es. a
+                // schermo spento, controllo ogni 20s), l'inizio vero
+                // può essere avvenuto fino a un intero intervallo
+                // prima di quando ce ne siamo accorti: lo aggiungiamo
+                // al tempo misurato, così Duration corrisponde al
+                // tempo REALE trascorso sotto soglia (stessa logica
+                // del margine usato nella calibrazione).
                 val since = belowThresholdSince
-                if (state == "RUNNING" && since != null &&
-                    System.currentTimeMillis() - since >= debounceSeconds * 1000L
-                ) {
-                    debounceConfirmations++
-                    if (debounceConfirmations >= DEBOUNCE_CONFIRMATIONS_REQUIRED) {
+                if (state == "RUNNING" && since != null) {
+                    val compensationMs =
+                        if (belowThresholdDetectedInNormalMode) normalIntervalSeconds * 1000L else 0L
+                    val elapsedMs = System.currentTimeMillis() - since + compensationMs
+
+                    if (elapsedMs >= debounceSeconds * 1000L) {
                         state = "WAITING"
                         belowThresholdSince = null
-                        debounceConfirmations = 0
                         cycleFinishedLocked = true
                         lastStatusText = "Cycle finished"
                         startAlarmSound()
@@ -242,10 +240,6 @@ class MonitorService : Service() {
 
                 try {
                     client?.close()
-                } catch (_: Exception) {
-                }
-                try {
-                    if (wakeLock?.isHeld == true) wakeLock?.release()
                 } catch (_: Exception) {
                 }
 
